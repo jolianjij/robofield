@@ -1,0 +1,3 @@
+"""RoboField: open-source framework for multi-robot games and AI experiments."""
+
+__version__ = "0.0.1"

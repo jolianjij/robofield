@@ -1,0 +1,83 @@
+# RoboField configuration — reference build
+field:
+  width_mm: 1000
+  height_mm: 1000
+  wall_height_mm: 100        # above the playing surface
+  wall_thickness_mm: 10
+  tile_size_mm: 250          # 4 x 4 printed tiles, 12 mm thick
+
+markers:
+  dictionary: DICT_4X4_50
+  # Tower marker centres [x, y, z] in field mm (origin = inner bottom-left field corner).
+  # Towers stand outside the walls at different heights so the camera pose is well constrained.
+  corners:
+    0: [-71, -71, 220]     # T3 (bottom-left)
+    1: [1071, -71, 260]    # T4 (bottom-right)
+    2: [1071, 1071, 180]   # T2 (top-right)
+    3: [-71, 1071, 140]    # T1 (top-left)
+  corner_size_mm: 80
+  robot_size_mm: 40        # consider 40 mm with the Pi Camera 3 Wide (see docs/vision.md)
+  object_size_mm: 35
+  robot_id_offset: 10        # robot N uses marker 10 + N
+
+camera:
+  index: 0
+  width: 2304
+  height: 1296
+  fps: 56
+  fourcc: MJPG
+  autofocus: false
+  focus: 0                   # tune once, then keep fixed
+  calibration_file: calibration/camera.npz   # optional, from tools/calibrate_camera.py
+  height_mm: 1300            # lens height above the field surface
+  model: pi_camera_3_wide    # 120 deg diagonal; capture on a Raspberry Pi (picamera2)
+
+vision:
+  estimator: plane           # plane (recommended) | pnp | homography (flat corners only)
+  robot_marker_height_mm: 84 # top of car above the field surface
+  corner_refinement: subpix
+
+comm:
+  port: /dev/ttyUSB0         # Windows: COM3
+  baud: 921600
+  rate_hz: 50
+
+robots:
+  - id: 0
+    name: car-0
+    max_speed_mm_s: 330
+
+# Robot model, shared by the simulator, the controllers and the RL environments.
+# Differential drive: 2 staggered N20 wheels near the middle + 1 front ball caster.
+# The robot's pose (x, y, theta) is the point midway between the wheels (the ArUco marker sits
+# right above it), theta along the driving direction.
+robot_model:
+  length_mm: 70
+  width_mm: 50
+  height_mm: 45              # marker plane
+  mass_g: 220
+  wheel_radius_mm: 16
+  wheel_width_mm: 8
+  track_mm: 42               # distance between the two wheel centres
+  axle_offset_mm: -17        # axle position along the body, from the body centre (negative = rear)
+  caster_offset_mm: 25       # caster position along the body, from the body centre (front)
+  caster_radius_mm: 5
+  max_wheel_rpm: 130         # N20 12 V / 200 rpm motors on a 2S pack (7.4-8.4 V)
+  stall_torque_nm: 0.065     # per motor (at 2S); DC motor model: torque = stall * (duty - speed / no-load speed)
+  deadzone: 0.08             # commands below this fraction do not move a wheel
+  wheel_accel_limit_mm_s2: 2000   # duty ramp in firmware: without it the car wheelies (17 deg in sim)
+
+control:
+  rate_hz: 30                # decision / command rate for every backend
+  latency_s: 0.07            # camera + processing + radio, measured on the real system later
+
+sim:
+  timestep_s: 0.002
+  pose_noise_mm: 0.8         # std of tracked position noise
+  heading_noise_rad: 0.01
+  randomize: false           # domain randomization (friction, mass, motor gain, latency)
+
+battery:
+  cells: 2                   # 2S pack, reported by the car as total pack voltage
+  nominal_mv: 7400
+  compensate: true           # scale motor commands by nominal / measured voltage (constant speed as it drains)
