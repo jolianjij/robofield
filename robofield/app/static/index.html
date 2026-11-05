@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboField Control Center</title>
+<style>
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #1d2430; --muted: #5d6675; --line: #d7dbe2;
+  --wall: #e08a3c; --tile: #f3f3ef; --grid: #d9dad3; --blue: #1f3a93; --ok: #2e7d32; --warn: #c77700; --bad: #c62828;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a21; --panel: #1f242d; --ink: #e8ebf0; --muted: #9aa3b2; --line: #333a46;
+    --tile: #2a2f38; --grid: #3a404b; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+header { display: flex; align-items: center; gap: 18px; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+.pill { padding: 3px 10px; border-radius: 999px; font-size: 12.5px; border: 1px solid var(--line); }
+.pill.ok { color: var(--ok); border-color: currentColor; }
+.pill.bad { color: var(--bad); border-color: currentColor; }
+header .spacer { flex: 1; }
+header label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+#estop { width: 92px; height: 92px; margin: -4px 0; border-radius: 50%; border: 6px solid #f2c200; background: radial-gradient(circle at 40% 35%, #ff5a4f, #b3140b);
+  color: #fff; font-weight: 800; font-size: 15px; letter-spacing: .5px; box-shadow: 0 3px 0 #7d0d06; }
+#estop.on { background: radial-gradient(circle at 40% 35%, #7a7a7a, #3d3d3d); box-shadow: inset 0 3px 8px rgba(0,0,0,.5); }
+
+main { display: grid; grid-template-columns: 320px 1fr 340px; gap: 14px; padding: 14px; height: calc(100% - 96px); }
+section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; overflow: auto; min-height: 0; }
+section h2 { font-size: 14px; margin: 0 0 10px; font-weight: 650; }
+
+/* cars */
+.car { border-left: 6px solid var(--c); padding: 8px 0 10px 12px; border-bottom: 1px solid var(--line); }
+.car.sel { background: color-mix(in srgb, var(--c) 9%, transparent); }
+.car .top { display: flex; align-items: center; gap: 8px; }
+.car .top input.name { flex: 1; border: none; background: transparent; font-weight: 650; font-size: 15px; padding: 2px 0; }
+.car .meta { color: var(--muted); font-size: 12.5px; margin: 3px 0 6px; }
+.car .warn { color: var(--warn); font-weight: 600; }
+.car .bad { color: var(--bad); font-weight: 600; }
+.bat { display: inline-block; width: 34px; height: 10px; border: 1px solid var(--muted); border-radius: 2px; vertical-align: -1px; position: relative; }
+.bat i { position: absolute; inset: 1px auto 1px 1px; background: var(--ok); }
+.car .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 13px; }
+.car .row span.lbl { width: 72px; color: var(--muted); }
+.car input[type=color] { width: 32px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+.car input[type=range] { flex: 1; }
+.car .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.empty { color: var(--muted); }
+
+/* map */
+#mapwrap { display: flex; flex-direction: column; min-height: 0; }
+.tools { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.tools button.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.tools .hint { color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+#map { flex: 1; width: 100%; min-height: 300px; border-radius: 10px; touch-action: none; cursor: crosshair; background: var(--bg); }
+
+/* right column */
+#cam { width: 100%; border-radius: 8px; background: #000; display: block; aspect-ratio: 16/9; object-fit: contain; }
+.set .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
+.set .row span.lbl { width: 120px; color: var(--muted); }
+.set input[type=range] { flex: 1; }
+#log { font-size: 12.5px; color: var(--muted); margin: 0; padding-left: 16px; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 12px; }
+
+@media (max-width: 1100px) {
+  main { grid-template-columns: 1fr; height: auto; }
+  #map { height: 70vw; }
+}
+@media (prefers-reduced-motion: no-preference) { button { transition: border-color .15s; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>RoboField Control Center</h1>
+  <span id="modePill" class="pill">…</span>
+  <span id="trackPill" class="pill">camera …</span>
+  <span class="spacer"></span>
+  <label>Speed limit <input id="speed" type="range" min="0.1" max="1" step="0.05"> <span id="speedVal" class="num"></span></label>
+  <button id="stopAll" title="Stop every robot (they stay ready)">Stop all</button>
+  <button id="estop" title="Emergency stop: cuts every motor until released (Esc)">STOP</button>
+</header>
+
+<main>
+  <section class="panel" id="carsPanel">
+    <h2>Cars</h2>
+    <div id="cars"><p class="empty">Waiting for cars… Power one on: it appears here once it joins the WiFi.</p></div>
+  </section>
+
+  <section class="panel" id="mapwrap">
+    <div class="tools" role="toolbar" aria-label="Map tools">
+      <button data-tool="select" class="active">Select</button>
+      <button data-tool="goal">Go to pose</button>
+      <button data-tool="path">Draw path</button>
+      <label class="hint"><input type="checkbox" id="pathHeading"> turn to the last direction at the end</label>
+      <span class="hint" id="toolHint">Click a car to select it.</span>
+    </div>
+    <canvas id="map"></canvas>
+  </section>
+
+  <section class="panel">
+    <h2>Camera</h2>
+    <div id="camBox"><p class="empty">Start the control center with <code>--pi &lt;address&gt;</code> to see the Pi camera here.</p></div>
+    <h2 style="margin-top:16px">Safety</h2>
+    <div class="set">
+      <div class="row"><span class="lbl">Wall margin</span><input id="margin" type="range" min="20" max="150" step="5"><span id="marginVal" class="num"></span></div>
+      <div class="row"><span class="lbl">Keep cars apart</span><input id="avoid" type="checkbox"><span id="sepVal" class="num"></span></div>
+      <div class="row"><span class="lbl">Keyboard</span><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive selected car, <kbd>Space</kbd> stop it, <kbd>Esc</kbd> emergency stop</span></div>
+    </div>
+    <h2 style="margin-top:16px">Activity</h2>
+    <ul id="log"></ul>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const api = (path, body) => fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+  .then((r) => r.json()).catch(() => ({ ok: false, msg: "no connection to the control center" }));
+
+let S = null;                 // latest state from the server
+let selected = null;          // selected robot id
+let tool = "select";
+let drag = null;              // {kind, pts:[[x,y]...], start:[x,y], end:[x,y]}
+let carIds = "";              // to rebuild the car list only when the set of cars changes
+const keys = new Set();
+
+// ------------------------------------------------------------------ helpers
+const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const rgbToHex = (c) => "#" + c.map((v) => Math.max(0, Math.min(255, v | 0)).toString(16).padStart(2, "0")).join("");
+const deg = (r) => (r * 180 / Math.PI).toFixed(0);
+const robot = (id) => S && S.robots.find((r) => r.id === id);
+
+// ------------------------------------------------------------------ map geometry
+const cv = $("#map"), ctx = cv.getContext("2d");
+let view = { s: 1, ox: 0, oy: 0 };
+function resize() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const size = (S ? S.field.size : 1000), pad = 170;
+  const span = size + 2 * pad;
+  view.s = Math.min(cv.width, cv.height) / span;
+  view.ox = (cv.width - size * view.s) / 2;
+  view.oy = (cv.height + size * view.s) / 2;
+}
+const toPx = (x, y) => [view.ox + x * view.s, view.oy - y * view.s];
+function toMm(ev) {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const px = (ev.clientX - r.left) * dpr, py = (ev.clientY - r.top) * dpr;
+  return [(px - view.ox) / view.s, (view.oy - py) / view.s];
+}
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+// ------------------------------------------------------------------ drawing
+function arrow(x, y, th, len, color, w) {
+  const [a, b] = toPx(x, y), [c, d] = toPx(x + len * Math.cos(th), y + len * Math.sin(th));
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = w;
+  ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke();
+  const h = 10 * window.devicePixelRatio, ang = Math.atan2(d - b, c - a);
+  ctx.beginPath(); ctx.moveTo(c, d);
+  ctx.lineTo(c - h * Math.cos(ang - 0.45), d - h * Math.sin(ang - 0.45));
+  ctx.lineTo(c - h * Math.cos(ang + 0.45), d - h * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
+}
+function polyline(pts, color, w, dash) {
+  if (!pts || pts.length < 2) return;
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.setLineDash(dash || []);
+  ctx.beginPath(); pts.forEach((p, i) => { const [a, b] = toPx(p[0], p[1]); i ? ctx.lineTo(a, b) : ctx.moveTo(a, b); });
+  ctx.stroke(); ctx.setLineDash([]);
+}
+function draw() {
+  if (!S) return;
+  const dpr = window.devicePixelRatio || 1, size = S.field.size, wall = S.field.wall;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  // floor + grid (thick lines on the 250 mm tile seams)
+  let [x0, y0] = toPx(0, size);
+  ctx.fillStyle = css("--tile"); ctx.fillRect(x0, y0, size * view.s, size * view.s);
+  for (let v = 0; v <= size; v += 100) {
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = (v % 250 === 0 ? 2 : 0.7) * dpr;
+    let [a, b] = toPx(v, 0), [c, d] = toPx(v, size); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke();
+    [a, b] = toPx(0, v); [c, d] = toPx(size, v); ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.stroke();
+  }
+  // safe area (geofence)
+  const m = S.settings.geofence_margin_mm;
+  [x0, y0] = toPx(m, size - m);
+  ctx.strokeStyle = css("--muted"); ctx.setLineDash([6 * dpr, 6 * dpr]); ctx.lineWidth = 1 * dpr;
+  ctx.strokeRect(x0, y0, (size - 2 * m) * view.s, (size - 2 * m) * view.s); ctx.setLineDash([]);
+  // walls
+  ctx.strokeStyle = css("--wall"); ctx.lineWidth = wall * view.s;
+  [x0, y0] = toPx(-wall / 2, size + wall / 2);
+  ctx.strokeRect(x0, y0, (size + wall) * view.s, (size + wall) * view.s);
+  // towers
+  S.field.towers.forEach(([id, x, y]) => {
+    const [a, b] = toPx(x - 50, y + 50);
+    ctx.fillStyle = "#222"; ctx.fillRect(a, b, 100 * view.s, 100 * view.s);
+    ctx.fillStyle = "#fff"; ctx.font = `${12 * dpr}px system-ui`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const [c, d] = toPx(x, y); ctx.fillText(`ID ${id}`, c, d);
+  });
+  // axes
+  arrow(0, 0, 0, 150, "#d32f2f", 3 * dpr); arrow(0, 0, Math.PI / 2, 150, "#2e7d32", 3 * dpr);
+  ctx.fillStyle = css("--muted"); ctx.font = `${12 * dpr}px system-ui`; ctx.textAlign = "center";
+  const [fx, fy] = toPx(size / 2, -60); ctx.fillText("front", fx, fy);
+  // robots
+  S.robots.forEach((r) => {
+    if (r.x === null) return;
+    polyline(r.trail, r.color + "88", 1.5 * dpr);
+    if (r.path && r.path.length) polyline([[r.x, r.y]].concat(r.path), r.color, 2.5 * dpr, [8 * dpr, 6 * dpr]);
+    if (r.goal) {
+      const [a, b] = toPx(r.goal[0], r.goal[1]);
+      ctx.strokeStyle = r.color; ctx.lineWidth = 2 * dpr; ctx.beginPath(); ctx.arc(a, b, 25 * view.s, 0, 2 * Math.PI); ctx.stroke();
+      if (r.mode === "goal") arrow(r.goal[0], r.goal[1], r.goal[2], 70, r.color, 2.5 * dpr);
+    }
+    const c = Math.cos(r.theta), s = Math.sin(r.theta);
+    const body = [[42, 0], [-28, 25], [-28, -25]].map(([bx, by]) => toPx(r.x + c * bx - s * by, r.y + s * bx + c * by));
+    ctx.fillStyle = r.visible ? r.color : "#9e9e9e"; ctx.strokeStyle = r.id === selected ? css("--ink") : "#0006";
+    ctx.lineWidth = (r.id === selected ? 3 : 1) * dpr;
+    ctx.beginPath(); body.forEach(([a, b], i) => (i ? ctx.lineTo(a, b) : ctx.moveTo(a, b))); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // the three LEDs, as the car shows them
+    r.leds.forEach((l, i) => {
+      const [a, b] = toPx(r.x + c * (-8 + 0) - s * (-14 + 14 * i), r.y + s * (-8) + c * (-14 + 14 * i));
+      ctx.fillStyle = rgbToHex(l); ctx.beginPath(); ctx.arc(a, b, 3.2 * dpr, 0, 2 * Math.PI); ctx.fill();
+    });
+    const [lx, ly] = toPx(r.x, r.y + 52);
+    ctx.fillStyle = css("--ink"); ctx.font = `600 ${12 * dpr}px system-ui`; ctx.textAlign = "center";
+    ctx.fillText(r.name + (r.safety ? `  ⚠ ${r.safety}` : ""), lx, ly);
+  });
+  // what the user is drawing
+  if (drag && drag.kind === "path") polyline(drag.pts, "#ff9800", 3 * dpr);
+  if (drag && drag.kind === "goal") {
+    const th = Math.atan2(drag.end[1] - drag.start[1], drag.end[0] - drag.start[0]);
+    arrow(drag.start[0], drag.start[1], th, 80, "#ff9800", 3 * dpr);
+  }
+  if (S.estop) {
+    ctx.fillStyle = "#c6282833"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#c62828"; ctx.font = `800 ${28 * dpr}px system-ui`; ctx.textAlign = "center";
+    ctx.fillText("EMERGENCY STOP: motors off", cv.width / 2, 40 * dpr);
+  }
+}
+
+// ------------------------------------------------------------------ car panel
+function carCard(r) {
+  const el = document.createElement("div");
+  el.className = "car"; el.dataset.id = r.id; el.style.setProperty("--c", r.color);
+  el.innerHTML = `
+    <div class="top">
+      <input type="color" class="mapcolor" title="Colour on the map" value="${r.color}">
+      <input class="name" value="${r.name}" aria-label="Car name">
+      <span class="num">#${r.id}</span>
+    </div>
+    <div class="meta num"></div>
+    <div class="row"><span class="lbl">LEDs</span>
+      <input type="color" class="led" data-i="0"><input type="color" class="led" data-i="1"><input type="color" class="led" data-i="2">
+      <label style="font-size:12.5px"><input type="checkbox" class="same" checked> same</label></div>
+    <div class="row"><span class="lbl">Max speed</span><input type="range" class="maxspeed" min="0.1" max="1" step="0.05"><span class="num msv"></span></div>
+    <div class="row"><span class="lbl">Gripper</span><input type="range" class="gripper" min="0" max="1" step="0.05"><span class="num gv"></span></div>
+    <div class="row"><span class="lbl">Enabled</span><input type="checkbox" class="enabled"></div>
+    <div class="btns">
+      <button class="identify" title="Flash this car's LEDs white for 2 s">Identify</button>
+      <button class="stop">Stop</button>
+      <button class="flash" title="Rebuild the firmware and send it to this car over WiFi">Update firmware</button>
+    </div>`;
+  el.querySelectorAll(".led").forEach((inp, i) => (inp.value = rgbToHex(r.leds[i])));
+  el.querySelector(".maxspeed").value = r.max_speed; el.querySelector(".msv").textContent = Math.round(r.max_speed * 100) + "%";
+  el.querySelector(".gripper").value = r.gripper; el.querySelector(".gv").textContent = r.gripper < 0.5 ? "open" : "closed";
+  el.querySelector(".enabled").checked = r.enabled;
+  el.addEventListener("click", (e) => { if (e.target.tagName !== "INPUT") select(r.id); });
+  el.querySelector(".name").addEventListener("change", (e) => api("/api/car", { id: r.id, name: e.target.value }));
+  el.querySelector(".mapcolor").addEventListener("input", (e) => { el.style.setProperty("--c", e.target.value); api("/api/car", { id: r.id, color: e.target.value }); });
+  el.querySelectorAll(".led").forEach((inp) => inp.addEventListener("input", () => {
+    const same = el.querySelector(".same").checked;
+    if (same) el.querySelectorAll(".led").forEach((o) => (o.value = inp.value));
+    api("/api/car", { id: r.id, leds: [...el.querySelectorAll(".led")].map((o) => hexToRgb(o.value)) });
+  }));
+  el.querySelector(".maxspeed").addEventListener("input", (e) => { el.querySelector(".msv").textContent = Math.round(e.target.value * 100) + "%"; api("/api/car", { id: r.id, max_speed: +e.target.value }); });
+  el.querySelector(".gripper").addEventListener("input", (e) => { el.querySelector(".gv").textContent = e.target.value < 0.5 ? "open" : "closed"; api("/api/car", { id: r.id, gripper: +e.target.value }); });
+  el.querySelector(".enabled").addEventListener("change", (e) => api("/api/car", { id: r.id, enabled: e.target.checked }));
+  el.querySelector(".identify").addEventListener("click", () => api("/api/identify", { id: r.id }));
+  el.querySelector(".stop").addEventListener("click", () => api("/api/stop", { id: r.id }));
+  el.querySelector(".flash").addEventListener("click", async () => {
+    if (!confirm(`Rebuild the firmware and send it to ${r.name} over WiFi? The car stops during the update.`)) return;
+    const res = await api("/api/flash", { id: r.id, method: "ota" });
+    alert(res.ok ? `Updating ${r.name}. Progress is written to ${res.msg}` : `Could not start the update: ${res.msg}`);
+  });
+  return el;
+}
+function renderCars() {
+  const box = $("#cars"), ids = S.robots.map((r) => r.id).join(",");
+  if (ids !== carIds) {
+    carIds = ids; box.innerHTML = "";
+    if (!S.robots.length) box.innerHTML = `<p class="empty">Waiting for cars… Power one on: it appears here once it joins the WiFi.</p>`;
+    S.robots.forEach((r) => box.appendChild(carCard(r)));
+    if (selected === null && S.robots.length) select(S.robots[0].id);
+  }
+  S.robots.forEach((r) => {
+    const el = box.querySelector(`.car[data-id="${r.id}"]`);
+    if (!el) return;
+    el.classList.toggle("sel", r.id === selected);
+    const v = r.battery_mv / 1000, pct = Math.max(0, Math.min(1, (v - 6.6) / (8.4 - 6.6)));
+    const bits = [];
+    bits.push(r.online ? (r.visible ? "seen" : `<span class="warn">not seen by camera</span>`) : `<span class="bad">offline</span>`);
+    if (r.battery_mv) bits.push(`<span class="bat"><i style="width:${(pct * 30) | 0}px;background:${pct < 0.2 ? "var(--bad)" : "var(--ok)"}"></i></span> ${v.toFixed(2)} V`);
+    if (r.rssi !== null) bits.push(`${r.rssi} dBm`);
+    bits.push(r.mode === "idle" ? "idle" : r.mode + (r.phase ? ` (${r.phase.toLowerCase()})` : ""));
+    if (r.x !== null) bits.push(`(${r.x.toFixed(0)}, ${r.y.toFixed(0)}) ${deg(r.theta)}°`);
+    if (r.safety) bits.push(`<span class="warn">${r.safety}</span>`);
+    if (r.flashing) bits.push(`<span class="warn">updating firmware…</span>`);
+    el.querySelector(".meta").innerHTML = bits.join(" &nbsp; ");
+  });
+}
+function select(id) { selected = id; renderCars(); draw(); }
+
+// ------------------------------------------------------------------ header, settings, log, camera
+let settingsInit = false, camInit = false;
+function renderChrome() {
+  $("#modePill").textContent = S.mode === "real" ? "real field" : "simulator";
+  const t = S.tracker;
+  $("#trackPill").textContent = t.ok ? `camera ok ${t.fps ? (+t.fps).toFixed(0) + " fps" : ""}` : (t.locked ? "camera data late" : "camera: no field lock");
+  $("#trackPill").className = "pill " + (t.ok ? "ok" : "bad");
+  $("#estop").classList.toggle("on", S.estop);
+  $("#estop").textContent = S.estop ? "RELEASE" : "STOP";
+  if (!settingsInit) {
+    settingsInit = true;
+    $("#speed").value = S.settings.speed_limit; $("#margin").value = S.settings.geofence_margin_mm; $("#avoid").checked = S.settings.avoid_collisions;
+  }
+  $("#speedVal").textContent = Math.round(S.settings.speed_limit * 100) + "%";
+  $("#marginVal").textContent = S.settings.geofence_margin_mm + " mm";
+  $("#sepVal").textContent = `${S.settings.min_separation_mm} mm`;
+  $("#log").innerHTML = S.log.slice().reverse().map((l) => `<li>${l}</li>`).join("");
+  if (!camInit && S.pi_preview) { camInit = true; $("#camBox").innerHTML = `<img id="cam" alt="Live view from the field camera" src="${S.pi_preview}">`; }
+}
+$("#speed").addEventListener("input", (e) => api("/api/settings", { speed_limit: +e.target.value }));
+$("#margin").addEventListener("input", (e) => api("/api/settings", { geofence_margin_mm: +e.target.value }));
+$("#avoid").addEventListener("change", (e) => api("/api/settings", { avoid_collisions: e.target.checked }));
+$("#estop").addEventListener("click", () => api("/api/estop", { on: !S.estop }));
+$("#stopAll").addEventListener("click", () => api("/api/stop", {}));
+
+// ------------------------------------------------------------------ map tools
+const hints = { select: "Click a car to select it.", goal: "Press where the car should go, drag toward where it should face, release.",
+  path: "Draw the path with the mouse (or a finger); the selected car follows it." };
+document.querySelectorAll(".tools button[data-tool]").forEach((b) => b.addEventListener("click", () => {
+  tool = b.dataset.tool;
+  document.querySelectorAll(".tools button[data-tool]").forEach((o) => o.classList.toggle("active", o === b));
+  $("#toolHint").textContent = hints[tool];
+}));
+cv.addEventListener("pointerdown", (ev) => {
+  const p = toMm(ev);
+  if (tool === "select") {
+    let best = null, bd = 80;
+    (S ? S.robots : []).forEach((r) => { if (r.x === null) return; const d = Math.hypot(r.x - p[0], r.y - p[1]); if (d < bd) { bd = d; best = r.id; } });
+    if (best !== null) select(best);
+    return;
+  }
+  if (selected === null) { $("#toolHint").textContent = "Select a car first (click it in the list)."; return; }
+  cv.setPointerCapture(ev.pointerId);
+  drag = tool === "goal" ? { kind: "goal", start: p, end: p } : { kind: "path", pts: [p] };
+});
+cv.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const p = toMm(ev);
+  if (drag.kind === "goal") drag.end = p;
+  else { const q = drag.pts[drag.pts.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 8) drag.pts.push(p); }
+  draw();
+});
+cv.addEventListener("pointerup", async () => {
+  if (!drag) return;
+  const d = drag; drag = null; let res;
+  if (d.kind === "goal") {
+    const moved = Math.hypot(d.end[0] - d.start[0], d.end[1] - d.start[1]) > 15;
+    const r = robot(selected);
+    const th = moved ? Math.atan2(d.end[1] - d.start[1], d.end[0] - d.start[0]) : (r ? r.theta : 0);
+    res = await api("/api/goal", { id: selected, x: d.start[0], y: d.start[1], theta: th });
+  } else if (d.pts.length > 2) {
+    const n = d.pts.length, a = d.pts[n - 2], b = d.pts[n - 1];
+    const th = $("#pathHeading").checked ? Math.atan2(b[1] - a[1], b[0] - a[0]) : null;
+    res = await api("/api/path", { id: selected, points: d.pts, theta: th });
+  }
+  if (res && !res.ok) $("#toolHint").textContent = res.msg;
+  draw();
+});
+
+// ------------------------------------------------------------------ keyboard driving (dead-man: only while keys are held)
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === "Escape") { api("/api/estop", { on: true }); return; }
+  if (e.key === " " && selected !== null) { api("/api/stop", { id: selected }); e.preventDefault(); return; }
+  keys.add(e.key.toLowerCase());
+});
+window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+window.addEventListener("blur", () => keys.clear());
+setInterval(() => {
+  if (selected === null) return;
+  const f = (keys.has("w") ? 1 : 0) - (keys.has("s") ? 1 : 0), t = (keys.has("a") ? 1 : 0) - (keys.has("d") ? 1 : 0);
+  if (!f && !t) return;
+  const v = 0.6 * f, w = 0.45 * t;
+  api("/api/drive", { id: selected, left: v - w, right: v + w });
+}, 100);
+
+// ------------------------------------------------------------------ main loop
+async function poll() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    S = await r.json();
+    if (!view.init) { view.init = true; resize(); }
+    renderChrome(); renderCars(); draw();
+  } catch (e) {
+    $("#trackPill").textContent = "no connection to the control center"; $("#trackPill").className = "pill bad";
+  }
+  setTimeout(poll, 100);
+}
+window.addEventListener("resize", () => { resize(); draw(); });
+poll();
+</script>
+</body>
+</html>

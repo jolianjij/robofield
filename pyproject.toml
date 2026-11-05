@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robofield"
+version = "0.0.1"
+description = "Open-source framework for multi-robot games and AI experiments"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "opencv-contrib-python>=4.8",
+  "pyyaml>=6.0",
+  "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+rl = ["gymnasium>=0.29", "pettingzoo>=1.24"]
+
+[tool.setuptools.packages.find]
+include = ["robofield*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

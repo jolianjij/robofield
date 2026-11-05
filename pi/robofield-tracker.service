@@ -1,0 +1,18 @@
+# Start the tracker automatically at boot:
+#   sudo cp pi/robofield-tracker.service /etc/systemd/system/
+#   sudo systemctl enable --now robofield-tracker
+#   journalctl -u robofield-tracker -f        (to see its output)
+[Unit]
+Description=RoboField camera tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/robofield
+ExecStart=/home/pi/robofield/.venv/bin/python pi/pi_tracker.py --preview 8080
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
