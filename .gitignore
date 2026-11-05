@@ -12,3 +12,4 @@ calibration/*.npz
 *.mp4
 firmware/car/include/secrets.h
 .claude/
+models/

@@ -2,9 +2,13 @@
 
 Models what the real system adds on top of physics, so policies learn to cope with it:
   - command latency (camera + processing + radio), as a delay line
-  - DC motor torque-speed curve (in the MJCF), dead zone, per-wheel gain mismatch, firmware duty ramp
+  - DC motor torque-speed curve (in the MJCF), per-wheel dead zone, per-wheel gain mismatch,
+    firmware duty ramp
   - tracking noise on the reported poses
-Domain randomization (cfg sim.randomize) re-draws these, plus friction and mass, every reset.
+Domain randomization (cfg sim.randomize) re-draws these, plus friction and mass, every reset,
+jittering each wheel independently around its own measured nominal value so training stays
+centred on the real car's actual asymmetry (see config/field.yaml robot_model.deadzone_left/right)
+instead of an idealised symmetric one.
 """
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ import numpy as np
 from robofield.core.backend import Backend
 from robofield.core.state import ObjectState, RobotCommand, RobotState, WorldState
 from robofield.core.types import wrap_angle
-from robofield.control.kinematics import DiffDrive
+from robofield.control.kinematics import DiffDrive, deadzones_from_config
 from .scene import MM, build_scene
 
 
@@ -39,7 +43,7 @@ class SimBackend(Backend):
         self.omega_max = m["max_wheel_rpm"] * 2 * math.pi / 60          # rad/s at the wheel
         # firmware duty ramp: duty may change by this much per second (accel limit / top speed)
         self.duty_rate = m.get("wheel_accel_limit_mm_s2", 1000) / self.dd.max_wheel_speed
-        self.nominal = dict(latency=cfg["control"]["latency_s"], deadzone=m["deadzone"],
+        self.nominal = dict(latency=cfg["control"]["latency_s"], deadzone=np.array(deadzones_from_config(cfg)),
                             noise_xy=sim.get("pose_noise_mm", 0.8),
                             noise_th=sim.get("heading_noise_rad", 0.01))
         self._free = [self.model.joint(f"r{i}_free").qposadr[0] for i in range(n_robots)]
@@ -57,12 +61,14 @@ class SimBackend(Backend):
     def _draw_params(self):
         p = dict(self.nominal)
         p["gain"] = np.ones((self.n, 2))
+        p["deadzone"] = np.tile(self.nominal["deadzone"], (self.n, 1))      # per robot, per wheel
         self.model.geom_friction[:] = self._base_friction
         self.model.body_mass[:] = self._base_mass
         if self.randomize:
             r = self.rng
             p["latency"] = r.uniform(0.04, 0.12)
-            p["deadzone"] = r.uniform(0.04, 0.12)
+            # jitter each wheel's dead zone independently around its own measured nominal
+            p["deadzone"] = np.clip(p["deadzone"] * r.uniform(0.7, 1.3, size=(self.n, 2)), 0.0, 0.5)
             p["gain"] = r.uniform(0.88, 1.12, size=(self.n, 2))          # unmatched motors: the car drifts
             p["noise_xy"] = r.uniform(0.3, 2.0)
             for g in self._wheel_geoms:
@@ -112,9 +118,8 @@ class SimBackend(Backend):
             if 0 <= rid < self.n:
                 self._cmd[rid] = c.clipped()
 
-    def _duty(self, u: float, gain: float) -> float:
+    def _duty(self, u: float, dz: float, gain: float) -> float:
         """Command -> motor duty: dead zone (the motor does not move below it) and gain mismatch."""
-        dz = self.p["deadzone"]
         if abs(u) < dz:
             return 0.0
         return max(-1.0, min(1.0, u * gain))
@@ -123,8 +128,9 @@ class SimBackend(Backend):
         self._queue.append(dict(self._cmd))
         active = self._queue[0]                                  # the command from `latency` ago
         dt = self.model.opt.timestep
-        targets = np.array([[self._duty(active[i].left, self.p["gain"][i, 0]),
-                             self._duty(active[i].right, self.p["gain"][i, 1])] for i in range(self.n)])
+        targets = np.array([[self._duty(active[i].left, self.p["deadzone"][i, 0], self.p["gain"][i, 0]),
+                             self._duty(active[i].right, self.p["deadzone"][i, 1], self.p["gain"][i, 1])]
+                            for i in range(self.n)])
         max_step = self.duty_rate * dt
         for _ in range(self.substeps):
             self._ramp += np.clip(targets - self._ramp, -max_step, max_step)      # firmware ramp
