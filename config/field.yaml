@@ -56,20 +56,29 @@ robot_model:
   width_mm: 50
   height_mm: 45              # marker plane
   mass_g: 220
-  wheel_radius_mm: 16
+  wheel_radius_mm: 16.5     # measured: 3.3 cm wheel diameter
   wheel_width_mm: 8
-  track_mm: 42               # distance between the two wheel centres
+  track_mm: 56               # measured: distance between the two wheel centres
   axle_offset_mm: -17        # axle position along the body, from the body centre (negative = rear)
   caster_offset_mm: 25       # caster position along the body, from the body centre (front)
   caster_radius_mm: 5
-  max_wheel_rpm: 130         # N20 12 V / 200 rpm motors on a 2S pack (7.4-8.4 V)
+  max_wheel_rpm: 120         # measured motor RPM (N20 on a 2S pack, 7.4-8.4 V)
   stall_torque_nm: 0.065     # per motor (at 2S); DC motor model: torque = stall * (duty - speed / no-load speed)
-  deadzone: 0.08             # commands below this fraction do not move a wheel
+  deadzone: 0.08             # fallback: commands below this fraction do not move a wheel
+  # Per-wheel dead zone and trim: motors are never perfectly matched. Leave these at the fallback
+  # value / 1.0 until you measure the real car (docs/tomorrow.md), then set them here so every
+  # controller and the simulator's domain randomization are centred on the real asymmetry instead
+  # of an idealised symmetric model.
+  deadzone_left: 0.08        # minimum duty that actually moves the left wheel
+  deadzone_right: 0.08       # minimum duty that actually moves the right wheel
+  trim_left: 1.0             # multiplicative speed correction for a straight-line drift
+  trim_right: 1.0
   wheel_accel_limit_mm_s2: 2000   # duty ramp in firmware: without it the car wheelies (17 deg in sim)
 
 control:
   rate_hz: 30                # decision / command rate for every backend
   latency_s: 0.07            # camera + processing + radio, measured on the real system later
+  clearance_mm: 20           # extra clearance beyond the robot's own half-diagonal for path/geofence margins
 
 sim:
   timestep_s: 0.002

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from robofield.control import DiffDrive, GoToPoint  # noqa: E402
+from robofield.control import DiffDrive, GoToPoint, deadzones_from_config  # noqa: E402
 from robofield.core import RobotCommand, load_config  # noqa: E402
 from robofield.real import RealBackend  # noqa: E402
 
@@ -23,7 +23,7 @@ def main():
     a = ap.parse_args()
     cfg = load_config(a.config)
     backend = RealBackend(cfg, robot_ids=[a.robot])
-    ctl = GoToPoint(DiffDrive.from_config(cfg), deadzone=cfg["robot_model"]["deadzone"], v_max=200)
+    ctl = GoToPoint(DiffDrive.from_config(cfg), deadzone=deadzones_from_config(cfg), v_max=200)
     try:
         backend.reset()
         for pt in a.points:
@@ -36,7 +36,7 @@ def main():
                 if r is None or not r.visible:              # not seen by the camera: stay still
                     backend.apply({a.robot: RobotCommand()})
                     continue
-                cmd, done = ctl.command(r.x, r.y, r.theta, gx, gy)
+                cmd, done = ctl.command(r.x, r.y, r.theta, gx, gy, r.omega, 1.0 / backend.control_hz)
                 backend.apply({a.robot: cmd})
                 if done:
                     print(f"   reached in {time.monotonic() - t0:.1f} s at ({r.x:.0f}, {r.y:.0f})")

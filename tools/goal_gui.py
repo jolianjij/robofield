@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import matplotlib  # noqa: E402
 
-from robofield.control import DiffDrive, PoseController  # noqa: E402
+from robofield.control import DiffDrive, PoseController, deadzones_from_config, safety_margin_mm  # noqa: E402
 from robofield.core import RobotCommand, load_config  # noqa: E402
 
 
@@ -27,7 +27,8 @@ class GoalGUI:
         import matplotlib.pyplot as plt
         from matplotlib.patches import Polygon, Rectangle
         self.plt, self.backend, self.cfg, self.robot, self.overlay = plt, backend, cfg, robot, overlay
-        self.ctl = PoseController(DiffDrive.from_config(cfg), deadzone=cfg["robot_model"]["deadzone"])
+        self.ctl = PoseController(DiffDrive.from_config(cfg), deadzone=deadzones_from_config(cfg),
+                                  margin=safety_margin_mm(cfg))
         self.trail, self.press, self.status = [], None, "click and drag to set a goal"
         self.fig, self.ax = plt.subplots(figsize=(8, 8))
         ax = self.ax
@@ -101,7 +102,7 @@ class GoalGUI:
         r = self.state.robots.get(self.robot)
         cmd = RobotCommand()
         if r is not None and r.visible and self.ctl.phase not in ("IDLE", "DONE"):
-            cmd = self.ctl.command(r.x, r.y, r.theta)
+            cmd = self.ctl.command(r.x, r.y, r.theta, r.omega, 1.0 / self.backend.control_hz)
             if self.ctl.done:
                 gx, gy, gth = self.ctl.goal
                 self.status = (f"reached: {math.hypot(r.x - gx, r.y - gy):.0f} mm, "

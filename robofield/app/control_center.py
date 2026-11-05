@@ -15,7 +15,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from robofield.control import DiffDrive, PoseController
+from robofield.control import DiffDrive, PoseController, deadzones_from_config, safety_margin_mm
 from robofield.core.state import RobotCommand
 from .safety import Safety, SafetySettings
 
@@ -38,10 +38,11 @@ class ControlCenter:
     def __init__(self, cfg: dict, backend, mode: str = "sim", cars_file: str | Path | None = None,
                  pi_host: str | None = None):
         self.cfg, self.backend, self.mode, self.pi_host = cfg, backend, mode, pi_host
-        m = cfg["robot_model"]
         self.dd = DiffDrive.from_config(cfg)
-        self.deadzone = m["deadzone"]
-        self.safety = Safety(self.dd, cfg["field"]["width_mm"], self.deadzone, SafetySettings())
+        self.deadzone = deadzones_from_config(cfg)
+        self.margin = safety_margin_mm(cfg)
+        self.safety = Safety(self.dd, cfg["field"]["width_mm"], self.deadzone,
+                             SafetySettings(geofence_margin_mm=self.margin))
         self.cars_file = Path(cars_file) if cars_file else ROOT / "config" / "cars.json"
         self.profiles: dict[int, CarProfile] = self._load_profiles()
         self.ctl: dict[int, PoseController] = {}
@@ -99,7 +100,8 @@ class ControlCenter:
 
     def _controller(self, rid) -> PoseController:
         if rid not in self.ctl:
-            self.ctl[rid] = PoseController(self.dd, deadzone=self.deadzone, field_mm=self.cfg["field"]["width_mm"])
+            self.ctl[rid] = PoseController(self.dd, deadzone=self.deadzone,
+                                           field_mm=self.cfg["field"]["width_mm"], margin=self.margin)
         return self.ctl[rid]
 
     def set_goal(self, rid: int, x: float, y: float, theta: float):
@@ -204,7 +206,7 @@ class ControlCenter:
                         cmd = RobotCommand(l, rr)
                 elif mode in ("goal", "path") and r is not None and r.visible:
                     c = self.ctl[rid]
-                    cmd = c.command(r.x, r.y, r.theta)
+                    cmd = c.command(r.x, r.y, r.theta, r.omega, 1.0 / self.backend.control_hz)
                     if c.done:
                         self.modes[rid] = "idle"
                         self._log(f"robot {rid}: arrived")
