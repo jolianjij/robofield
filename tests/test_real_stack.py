@@ -55,11 +55,14 @@ def test_real_backend_drives_to_points():
                 ws = backend.step(); r = ws.robots.get(0)
                 if r is None:
                     continue
-                cmd, done = ctl.command(r.x, r.y, r.theta, gx, gy)
+                cmd, done = ctl.command(r.x, r.y, r.theta, gx, gy, r.omega, 1 / backend.control_hz)
                 backend.apply({0: cmd})
                 if done:
                     ok = True; break
-            backend.apply({0: RobotCommand()})
+            # "done" is decided on the delay-predicted pose: commands already in flight still have
+            # to land, so measure once the robot is at rest
+            for _ in range(15):
+                backend.apply({0: RobotCommand()}); backend.step()
             tx, ty, _ = sim.true_pose(0)
             reached.append((ok, math.hypot(tx - gx, ty - gy), time.monotonic() - t0))
     finally:

@@ -23,32 +23,33 @@ ROOT = Path(__file__).resolve().parents[2]
 PALETTE = ["#1e88e5", "#e53935", "#43a047", "#fb8c00", "#8e24aa", "#00acc1", "#fdd835", "#6d4c41"]
 
 # (key, group, label, min, max, step, unit) - drives both ControlCenter's tuning API and the
-# tuning web page's form, so the two never drift apart. `ang_tol`/`face_tol` are degrees here and
-# in the API, converted to radians only where PoseController itself needs them.
+# tuning web page's form, so the two never drift apart. *_deg keys are degrees here and in the API,
+# converted to radians only where PoseController itself needs them.
 TUNING_SCHEMA = [
-    ("v_path",          "Follow",     "Cruise speed",        20,  330, 5,    "mm/s"),
-    ("slow_radius",      "Follow",     "Slow-down radius",    50,  600, 10,   "mm"),
-    ("lookahead",        "Follow",     "Lookahead",           30,  200, 5,    "mm"),
-    ("k_heading",        "Follow",     "Heading gain (kp)",   0.5, 10,  0.1,  "1/s"),
-    ("kd_heading",       "Follow",     "Heading damping (kd)", 0.0, 5,  0.05, ""),
-    ("w_cap_frac",       "Follow",     "Max turn rate",       0.1, 1.0, 0.05, "x top speed"),
-    ("w_accel_limit",    "Follow",     "Corner smoothing",    5,   200, 5,    "rad/s^2"),
-    ("align_k",          "Align",      "Heading gain (kp)",   0.5, 10,  0.1,  "1/s"),
-    ("align_kd",         "Align",      "Heading damping (kd)", 0.0, 5,  0.05, ""),
-    ("align_w_cap_frac", "Align",      "Max turn rate",       0.1, 1.0, 0.05, "x top speed"),
-    ("ang_tol_deg",      "Align",      "Angle tolerance",     1,   20,  0.5,  "deg"),
-    ("goto_v_max",       "Final stop", "Max speed",           20,  330, 5,    "mm/s"),
-    ("goto_k_rho",       "Final stop", "Forward gain",        0.5, 8,   0.1,  "1/s"),
-    ("goto_k_alpha",     "Final stop", "Heading gain (kp)",   0.5, 10,  0.1,  "1/s"),
-    ("goto_kd_alpha",    "Final stop", "Heading damping (kd)", 0.0, 5,  0.05, ""),
-    ("goto_w_cap_frac",  "Final stop", "Max turn rate",       0.1, 1.0, 0.05, "x top speed"),
-    ("pos_tol",          "Final stop", "Position tolerance",  3,   40,  1,    "mm"),
-    ("deadzone_left",    "Motors",     "Left dead zone",      0.0, 0.4, 0.01, "duty"),
-    ("deadzone_right",   "Motors",     "Right dead zone",     0.0, 0.4, 0.01, "duty"),
-    ("trim_left",        "Motors",     "Left trim",           0.5, 1.5, 0.01, "x"),
-    ("trim_right",       "Motors",     "Right trim",          0.5, 1.5, 0.01, "x"),
+    ("v_path",           "Lines & curves",    "Cruise speed",                 100, 340,  5,     "mm/s"),
+    ("accel",            "Lines & curves",    "Acceleration / braking",       100, 1500, 25,    "mm/s2"),
+    ("lat_accel",        "Lines & curves",    "Curve speed limit (side accel)", 100, 2000, 25,  "mm/s2"),
+    ("lookahead",        "Lines & curves",    "Lookahead",                    50,  250,  5,     "mm"),
+    ("pos_tol",          "Lines & curves",    "Arrive within",                5,   40,   1,     "mm"),
+    ("pass_tol",         "Lines & curves",    "Accept a just-passed goal within", 10, 80, 1,    "mm"),
+    ("reface_angle_deg", "Lines & curves",    "Stop and re-face if off by",   30,  120,  5,     "deg"),
+    ("face_tol_deg",     "Final orientation", "Face the path within",         5,   45,   1,     "deg"),
+    ("ang_tol_deg",      "Final orientation", "Final heading within",         1,   15,   0.5,   "deg"),
+    ("fine_angle_deg",   "Final orientation", "Nudge instead of turn below",  5,   60,   1,     "deg"),
+    ("wait_s",           "Final orientation", "Wait between nudges",          0.1, 1.0,  0.05,  "s"),
+    ("pulse_speed",      "Final orientation", "Nudge wheel speed",            100, 250,  5,     "mm/s"),
+    ("align_k",          "Final orientation", "Coarse turn gain (kp)",        0.5, 10,   0.1,   "1/s"),
+    ("align_kd",         "Final orientation", "Coarse turn damping (kd)",     0.0, 5,    0.05,  ""),
+    ("align_w_cap_frac", "Final orientation", "Coarse turn speed cap",        0.1, 1.0,  0.05,  "x top"),
+    ("predict",          "Delay prediction",  "Prediction on (1) / off (0)",  0,   1,    1,     ""),
+    ("latency_s",        "Delay prediction",  "Loop delay to predict over",   0.0, 0.5,  0.01,  "s"),
+    ("trim_left",        "Motors",            "Left trim",                    0.7, 1.2,  0.005, "x"),
+    ("trim_right",       "Motors",            "Right trim",                   0.7, 1.2,  0.005, "x"),
 ]
 TUNING_KEYS = {row[0] for row in TUNING_SCHEMA}
+_DEG_KEYS = {"reface_angle_deg": "reface_angle", "face_tol_deg": "face_tol", "ang_tol_deg": "ang_tol",
+             "fine_angle_deg": "fine_angle"}
+_PC_KEYS = TUNING_KEYS - set(_DEG_KEYS) - {"predict", "latency_s", "trim_left", "trim_right"}
 
 
 @dataclass
@@ -74,8 +75,10 @@ class ControlCenter:
         self.cars_file = Path(cars_file) if cars_file else ROOT / "config" / "cars.json"
         self.profiles: dict[int, CarProfile] = self._load_profiles()
         self.ctl: dict[int, PoseController] = {}
+        self._dd0 = self.dd
         self.tuning: dict = self._default_tuning()
-        self.tuning.update(cfg.get("tuning", {}))          # persisted overrides, if any
+        self._load_saved_tuning()
+        self._apply_tuning()
         self.modes: dict[int, str] = {}                 # idle | manual | goal | path
         self.manual: dict[int, tuple] = {}              # rid -> (left, right, time)
         self.identify_until: dict[int, float] = {}
@@ -136,20 +139,38 @@ class ControlCenter:
         return self.ctl[rid]
 
     # ------------------------------------------------------------------ live tuning
-    @staticmethod
-    def _default_tuning() -> dict:
-        pc_defaults = PoseController(DiffDrive(16.5, 56.0, 120.0))   # a throwaway instance, just for its field defaults
-        d = {k: getattr(pc_defaults, k) for k in TUNING_KEYS if hasattr(pc_defaults, k)}
-        d["ang_tol_deg"] = math.degrees(pc_defaults.ang_tol)
-        d["deadzone_left"] = d["deadzone_right"] = 0.08
-        d["trim_left"] = d["trim_right"] = 1.0
+    def _default_tuning(self) -> dict:
+        pc = PoseController(self._dd0)                 # a throwaway instance, just for its field defaults
+        d = {k: float(getattr(pc, k)) for k in _PC_KEYS}
+        d.update({k: math.degrees(getattr(pc, attr)) for k, attr in _DEG_KEYS.items()})
+        d["predict"] = 1.0
+        d["latency_s"] = float(self.cfg["control"]["latency_s"])
+        d["trim_left"], d["trim_right"] = self._dd0.trim_left, self._dd0.trim_right   # measured, from the config
         return d
 
-    _NON_POSE_CONTROLLER_KEYS = {"ang_tol_deg", "deadzone_left", "deadzone_right", "trim_left", "trim_right"}
+    def _tuning_path(self) -> Path:
+        return Path(self.cfg.get("_path", "config/field.yaml")).with_name("tuning.yaml")
+
+    def _load_saved_tuning(self):
+        import yaml
+        path = self._tuning_path()
+        if path.exists():
+            saved = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            self.tuning.update({k: float(v) for k, v in saved.items() if k in TUNING_KEYS})
+
+    def _apply_tuning(self):
+        """Push the values that live outside PoseController to where they are used."""
+        if hasattr(self.backend, "predict"):
+            self.backend.predict = self.tuning["predict"] >= 0.5
+        if hasattr(self.backend, "latency"):
+            self.backend.latency = self.tuning["latency_s"]
+        self.dd = replace(self.dd, trim_left=self.tuning["trim_left"], trim_right=self.tuning["trim_right"])
+        self.safety.dd = self.dd
+        self.ctl.clear()    # next goal/path rebuilds every controller with the new values
 
     def _pose_controller_kwargs(self) -> dict:
-        kw = {k: v for k, v in self.tuning.items() if k in TUNING_KEYS and k not in self._NON_POSE_CONTROLLER_KEYS}
-        kw["ang_tol"] = math.radians(self.tuning["ang_tol_deg"])
+        kw = {k: self.tuning[k] for k in _PC_KEYS}
+        kw.update({attr: math.radians(self.tuning[k]) for k, attr in _DEG_KEYS.items()})
         return kw
 
     def get_tuning(self) -> dict:
@@ -162,42 +183,27 @@ class ControlCenter:
             if bad:
                 return False, f"unknown parameter(s): {', '.join(sorted(bad))}"
             self.tuning.update({k: float(v) for k, v in changes.items()})
-            if {"deadzone_left", "deadzone_right"} & set(changes):
-                self.deadzone = (self.tuning["deadzone_left"], self.tuning["deadzone_right"])
-                self.safety.deadzone = self.deadzone
-            if {"trim_left", "trim_right"} & set(changes):
-                self.dd = replace(self.dd, trim_left=self.tuning["trim_left"], trim_right=self.tuning["trim_right"])
-                self.safety.dd = self.dd
-            self.ctl.clear()    # next goal/path rebuilds every controller with the new values
-            self._log(f"tuning changed: {', '.join(changes)}")
+            self._apply_tuning()
+            self._log("tuning: " + ", ".join(f"{k}={float(v):g}" for k, v in changes.items()))
             return True, "ok"
 
     def reset_tuning(self):
         with self.lock:
             self.tuning = self._default_tuning()
-            self.deadzone = (self.tuning["deadzone_left"], self.tuning["deadzone_right"])
-            self.safety.deadzone = self.deadzone
-            self.dd = replace(self.dd, trim_left=self.tuning["trim_left"], trim_right=self.tuning["trim_right"])
-            self.safety.dd = self.dd
-            self.ctl.clear()
+            self._apply_tuning()
             self._log("tuning reset to defaults")
             return True, "ok"
 
     def save_tuning(self):
-        """Persist the current tuning values into config/field.yaml, so they survive a restart."""
+        """Persist the current values to config/tuning.yaml (loaded on top of the defaults at startup).
+        A separate file, so field.yaml - measurements with their explanations - is never rewritten."""
         import yaml
         with self.lock:
-            path = Path(self.cfg.get("_path", "config/field.yaml"))
-            try:
-                raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            except FileNotFoundError:
-                return False, f"config file not found: {path}"
-            raw.setdefault("tuning", {}).update({k: v for k, v in self.tuning.items()
-                                                 if k not in ("deadzone_left", "deadzone_right", "trim_left", "trim_right")})
-            m = raw.setdefault("robot_model", {})
-            m["deadzone_left"], m["deadzone_right"] = self.tuning["deadzone_left"], self.tuning["deadzone_right"]
-            m["trim_left"], m["trim_right"] = self.tuning["trim_left"], self.tuning["trim_right"]
-            path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            path = self._tuning_path()
+            body = yaml.safe_dump({k: round(float(v), 4) for k, v in self.tuning.items()}, sort_keys=False)
+            header = ("# Saved from the live tuning page (/tuning). Overrides the defaults at startup;\n"
+                      "# delete this file to go back to them.\n")
+            path.write_text(header + body, encoding="utf-8")
             self._log(f"tuning saved to {path}")
             return True, str(path)
 
