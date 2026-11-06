@@ -73,81 +73,104 @@ class GoToPoint:
 
 @dataclass
 class TurnTo:
-    """Turn in place to a heading: turn, stop, wait, nudge.
+    """Turn in place to a heading: pulse, wait, measure, repeat.
 
-    Far from the target (outside `fine_angle`) it turns continuously, steering on the PREDICTED
-    heading, so it stops early enough to account for the delay. Inside `fine_angle` it never turns
-    continuously: it stops, waits `wait_s` (longer than the loop delay, so the camera has caught up
-    and the robot has really stopped), then makes one short pulse sized for the remaining error,
-    and waits again. Each pulse's result teaches the next one (`pulse_s_per_rad` adapts), so the
-    nudges stay right as the battery, floor and motors change.
+    Every move is an open-loop pulse at the car's slowest turning speed, sized from a two-number
+    model of this car - how long it takes to start turning from a standstill (`start_s`) and how
+    fast it then turns (`turn_rate`) - followed by a wait (`wait_s`, longer than the ~0.2 s loop
+    delay) until the camera shows it at rest. Only then is the next move decided, on a fresh,
+    still measurement. Both model numbers are re-learned from every pulse's measured result: a
+    pulse that did not move the robot lengthens `start_s`, one that over- or under-shot corrects
+    `turn_rate`. So it keeps working as the battery, the floor and the motors change.
 
-    Why not a continuous controller all the way in: with a ~0.2 s delay a continuous correction is
-    always acting on where the robot WAS, and since the slowest it can turn is several rad/s (the
-    motors cannot crawl), every correction overshoots the other way - the left-right oscillation
-    seen on the real car. Waiting out the delay between moves removes the stale-data problem
-    entirely; the predictor only has to be good enough to get the coarse turn close.
-
-    With `continuous=True` (used to face along a path before driving) it just turns until within
-    `tolerance`, with no waiting or pulses."""
+    Why not a continuous turn steering on the predicted heading: from a standstill this car needs
+    extra time to overcome friction and wheel scrub before it rotates at all, so short corrections
+    predicted to turn it in fact barely do - the controller sees a predicted heading that is
+    already "close", stops, and the robot stalls at the wrong orientation; or, turning fast on
+    stale camera data, it overshoots one way then the other. Waiting out the delay between moves
+    removes both problems: no decision is ever made on data older than the move that preceded it."""
     dd: DiffDrive
-    k: float = 3.5              # 1/s, coarse turn PID kp
-    kd: float = 1.0             # damping on the measured turn rate
-    w_cap_frac: float = 0.45    # coarse turn rate cap, fraction of dd.max_omega
     tolerance: float = math.radians(4.0)
     deadzone: float | tuple[float, float] = 0.0
-    fine_angle: float = math.radians(25.0)
     wait_s: float = 0.35
-    pulse_speed: float = 100.0           # wheel speed during a nudge (mm/s); the car's slowest
-    pulse_s_per_rad: float = 0.25        # first guess; learned from every nudge
-    pulse_min_s: float = 0.03
-    pulse_max_s: float = 0.25
+    pulse_speed: float = 150.0           # mm/s of the driving wheel while turning
+    mode: str = "pivot"                  # "pivot" (one wheel), "spin" (both, in place), "continuous" (old)
+    start_s: float = 0.06                # learned: time from a standstill before it really turns
+    turn_rate: float = 2.5               # learned: rad/s once turning (pivot: wheel speed / track)
+    pulse_max_s: float = 0.6
     still_omega: float = 0.4             # rad/s: below this the robot counts as stopped
-    continuous: bool = False
+    learn: dict | None = None            # share one learned model between several TurnTo's
     _t: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self):
-        cap = self.w_cap_frac * self.dd.max_omega
-        self._pid = PID(kp=self.k, kd=self.kd, out_min=-cap, out_max=cap)
+        if self.learn is None:
+            self.learn = {}
+        self.learn.setdefault("start_s", self.start_s)
+        self.learn.setdefault("turn_rate", self.turn_rate)
         self.reset()
 
     def reset(self, wait: bool = False) -> None:
         """wait=True: start by letting the robot settle (e.g. right after it stopped driving)."""
-        self._pid.reset()
         self.state = "WAIT" if wait else "DECIDE"
         self._t0 = self._t
-        self._pulse = None          # (length s, direction, error before) of the last nudge
+        self._pulse = None          # (length s, direction, error before) of the last pulse
+        self._pulses = getattr(self, "_pulses", 0)
 
-    def _turn(self, w: float) -> RobotCommand:
-        left, right = self.dd.inverse(0.0, w)
-        return RobotCommand(left, right)
+    def _turn(self, direction: float) -> RobotCommand:
+        """One wheel drives, the other stays still: a pivot about the still wheel. Spinning both
+        wheels in place needs a hard kick to break them free sideways and then coasts a long way
+        (measured on the real car); one wheel breaks free gently, turns half as fast and stops
+        sooner. Which wheel does the work alternates from pulse to pulse, so the small sideways
+        shift of each pivot is undone by the next."""
+        if self.mode == "spin":
+            left, right = self.dd.inverse(0.0, direction * 2 * self.pulse_speed / self.dd.track_mm)
+            return RobotCommand(left, right)
+        forward = (self._pulses % 2 == 0)
+        if direction > 0:                                  # counter-clockwise
+            return (RobotCommand(0.0, self.dd.wheel_command(self.pulse_speed * self.dd.trim_right)) if forward
+                    else RobotCommand(-self.dd.wheel_command(self.pulse_speed * self.dd.trim_left), 0.0))
+        return (RobotCommand(self.dd.wheel_command(self.pulse_speed * self.dd.trim_left), 0.0) if forward
+                else RobotCommand(0.0, -self.dd.wheel_command(self.pulse_speed * self.dd.trim_right)))
+
+    def _learn(self, e: float) -> None:
+        length, direction, e_before = self._pulse
+        moved = (e_before - e) * direction                       # rad turned toward the target
+        m = self.learn
+        if moved < math.radians(1.0):                            # it hardly moved: it needs longer to start
+            m["start_s"] = min(0.4, m["start_s"] + 0.03)
+            return
+        turning = length - m["start_s"]
+        if turning > 0.03:
+            m["turn_rate"] = min(12.0, max(0.5, 0.5 * m["turn_rate"] + 0.5 * moved / turning))
+        else:                                                    # moved although it should only just have started
+            m["start_s"] = max(0.0, m["start_s"] - 0.02)
 
     def command(self, th: float, target: float, omega: float = 0.0, dt: float = 1 / 30) -> tuple[RobotCommand, bool]:
-        omega = max(-self.dd.max_omega, min(self.dd.max_omega, omega))
         self._t += dt
         e = wrap_angle(target - th)
-        if self.continuous:
+
+        if self.mode == "continuous":
+            # the old controller: steer continuously on whatever heading it is given. Kept only to
+            # show the difference - on the real car it oscillates left and right at the end
             if abs(e) < self.tolerance:
-                self._pid.reset()
                 return RobotCommand(), True
-            return self._turn(self._pid.step(e, omega, dt)), False
+            w = 3.5 * e - 1.0 * omega
+            speed = max(abs(w) * self.dd.track_mm / 2, self.pulse_speed)   # hard enough to actually turn
+            left, right = self.dd.inverse(0.0, math.copysign(2 * speed / self.dd.track_mm, w))
+            return RobotCommand(left, right), False
 
         if self.state == "PULSE":
             length, direction, _ = self._pulse
             if self._t - self._t0 < length:
-                return self._turn(direction * 2 * self.pulse_speed / self.dd.track_mm), False
+                return self._turn(direction), False
             self.state, self._t0 = "WAIT", self._t
             return RobotCommand(), False
 
         if self.state == "WAIT":
             if self._t - self._t0 < self.wait_s or abs(omega) > self.still_omega:
                 return RobotCommand(), False
-            if self._pulse is not None:                       # learn from the last nudge
-                length, direction, e_before = self._pulse
-                moved = (e_before - e) * direction            # rad turned toward the target
-                if moved > math.radians(0.5):
-                    seen = length / moved
-                    self.pulse_s_per_rad = min(2.0, max(0.02, 0.5 * self.pulse_s_per_rad + 0.5 * seen))
+            if self._pulse is not None:
+                self._learn(e)
                 self._pulse = None
             self.state = "DECIDE"
 
@@ -156,20 +179,12 @@ class TurnTo:
                 return RobotCommand(), True
             self.state = "DECIDE"
 
-        if self.state == "TURN" and abs(e) <= self.fine_angle:   # close: stop and look again
-            self._pid.reset()
-            self.state, self._t0 = "WAIT", self._t
-            return RobotCommand(), False
-
-        # DECIDE (or still turning)
         if abs(e) < self.tolerance:
             self.state = "DONE"
             return RobotCommand(), True
-        if abs(e) > self.fine_angle:
-            self.state = "TURN"
-            return self._turn(self._pid.step(e, omega, dt)), False
-        length = min(self.pulse_max_s, max(self.pulse_min_s, self.pulse_s_per_rad * abs(e)))
+        length = min(self.pulse_max_s, self.learn["start_s"] + abs(e) / self.learn["turn_rate"])
         direction = 1.0 if e > 0 else -1.0
         self._pulse = (length, direction, e)
+        self._pulses += 1
         self.state, self._t0 = "PULSE", self._t
-        return self._turn(direction * 2 * self.pulse_speed / self.dd.track_mm), False
+        return self._turn(direction), False

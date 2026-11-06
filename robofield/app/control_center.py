@@ -35,20 +35,16 @@ TUNING_SCHEMA = [
     ("reface_angle_deg", "Lines & curves",    "Stop and re-face if off by",   30,  120,  5,     "deg"),
     ("face_tol_deg",     "Final orientation", "Face the path within",         5,   45,   1,     "deg"),
     ("ang_tol_deg",      "Final orientation", "Final heading within",         1,   15,   0.5,   "deg"),
-    ("fine_angle_deg",   "Final orientation", "Nudge instead of turn below",  5,   60,   1,     "deg"),
     ("wait_s",           "Final orientation", "Wait between nudges",          0.1, 1.0,  0.05,  "s"),
     ("pulse_speed",      "Final orientation", "Nudge wheel speed",            100, 250,  5,     "mm/s"),
-    ("align_k",          "Final orientation", "Coarse turn gain (kp)",        0.5, 10,   0.1,   "1/s"),
-    ("align_kd",         "Final orientation", "Coarse turn damping (kd)",     0.0, 5,    0.05,  ""),
-    ("align_w_cap_frac", "Final orientation", "Coarse turn speed cap",        0.1, 1.0,  0.05,  "x top"),
+    ("turn_style",       "Final orientation", "New pulse turns (1) / old continuous (0)", 0, 1, 1, ""),
     ("predict",          "Delay prediction",  "Prediction on (1) / off (0)",  0,   1,    1,     ""),
     ("latency_s",        "Delay prediction",  "Loop delay to predict over",   0.0, 0.5,  0.01,  "s"),
     ("trim_left",        "Motors",            "Left trim",                    0.7, 1.2,  0.005, "x"),
     ("trim_right",       "Motors",            "Right trim",                   0.7, 1.2,  0.005, "x"),
 ]
 TUNING_KEYS = {row[0] for row in TUNING_SCHEMA}
-_DEG_KEYS = {"reface_angle_deg": "reface_angle", "face_tol_deg": "face_tol", "ang_tol_deg": "ang_tol",
-             "fine_angle_deg": "fine_angle"}
+_DEG_KEYS = {"reface_angle_deg": "reface_angle", "face_tol_deg": "face_tol", "ang_tol_deg": "ang_tol"}
 _PC_KEYS = TUNING_KEYS - set(_DEG_KEYS) - {"predict", "latency_s", "trim_left", "trim_right"}
 
 
@@ -75,6 +71,7 @@ class ControlCenter:
         self.cars_file = Path(cars_file) if cars_file else ROOT / "config" / "cars.json"
         self.profiles: dict[int, CarProfile] = self._load_profiles()
         self.ctl: dict[int, PoseController] = {}
+        self._learned: dict[int, dict] = {}             # each car's learned turning model, kept across rebuilds
         self._dd0 = self.dd
         self.tuning: dict = self._default_tuning()
         self._load_saved_tuning()
@@ -135,6 +132,7 @@ class ControlCenter:
         if rid not in self.ctl:
             self.ctl[rid] = PoseController(self.dd, deadzone=self.deadzone,
                                            field_mm=self.cfg["field"]["width_mm"], margin=self.margin,
+                                           learned=self._learned.setdefault(rid, {}),
                                            **self._pose_controller_kwargs())
         return self.ctl[rid]
 
@@ -314,7 +312,12 @@ class ControlCenter:
                         self.modes[rid] = "idle"
                         self._log(f"robot {rid}: arrived")
                 s = max(0.0, min(1.0, p.max_speed))
-                cmd = RobotCommand(cmd.left * s, cmd.right * s)
+                if s < 1.0 and (cmd.left or cmd.right):
+                    # scale the body motion, not each wheel's command: on this car's non-linear
+                    # motors a per-wheel multiply sends both wheels to the same minimum speed and
+                    # erases steering; inverse() keeps the turn ratio, as slow as the car can go
+                    v, w = self.dd.forward(cmd.left, cmd.right)
+                    cmd = RobotCommand(*self.dd.inverse(v * s, w * s))
                 leds = [list(map(int, c)) for c in p.leds]
                 if now < self.identify_until.get(rid, 0):
                     leds = [[255, 255, 255]] * 3 if int(now * 6) % 2 else [[0, 0, 0]] * 3
