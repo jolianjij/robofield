@@ -72,6 +72,8 @@ class ControlCenter:
         self.profiles: dict[int, CarProfile] = self._load_profiles()
         self.ctl: dict[int, PoseController] = {}
         self._learned: dict[int, dict] = {}             # each car's learned turning model, kept across rebuilds
+        self.last_path: dict[int, tuple] = {}           # rid -> (points, final_theta) of the last path drawn
+        self._gen = 0                                   # bumped by every new order (lets a playing move notice a STOP)
         self._dd0 = self.dd
         self.tuning: dict = self._default_tuning()
         self._load_saved_tuning()
@@ -213,37 +215,125 @@ class ControlCenter:
             c = self._controller(rid)
             c.set_goal(x, y, theta, (r.x, r.y))
             self.modes[rid] = "goal"
+            self._gen += 1
             self._send_overlay(rid)
             self._log(f"robot {rid}: go to ({x:.0f}, {y:.0f}) {math.degrees(theta):.0f} deg")
             return True, "ok"
 
-    def set_path(self, rid: int, points: list, final_theta: float | None = None):
+    def set_path(self, rid: int, points: list, final_theta: float | None = None, from_start: bool = False):
+        """from_start: follow the whole path from its first point (a replayed move), instead of
+        joining it at the point nearest the car (a freshly drawn one)."""
         with self.lock:
             r = self.state.robots.get(rid) if self.state else None
             if r is None or len(points) < 2:
                 return False, "robot not visible or path too short"
-            self._controller(rid).set_path(points, (r.x, r.y), final_theta)
+            self._controller(rid).set_path(points, (r.x, r.y), final_theta, nearest=not from_start)
             self.modes[rid] = "path"
+            self._gen += 1
+            self.last_path[rid] = ([list(map(float, p)) for p in points], final_theta)
             self._send_overlay(rid)
             self._log(f"robot {rid}: follow drawn path ({len(points)} points)")
             return True, "ok"
+
+    # ------------------------------------------------------------------ saved moves (a drawn path, kept to replay)
+    @property
+    def moves_dir(self) -> Path:
+        return Path(self.cfg.get("_path", "config/field.yaml")).parent / "moves"
+
+    @staticmethod
+    def _move_name(name: str) -> str:
+        clean = "".join(c for c in str(name).strip().replace(" ", "_") if c.isalnum() or c in "_-")
+        if not clean:
+            raise ValueError("give the move a name (letters, digits, - or _)")
+        return clean
+
+    def save_move(self, rid: int, name: str, points: list | None = None, theta: float | None = None):
+        """Save `points` (or, without them, the path last drawn for car `rid`) as a named move."""
+        with self.lock:
+            if points is None:
+                if rid not in self.last_path:
+                    return False, "draw a path for this car first"
+                points, theta = self.last_path[rid]
+            if len(points) < 2:
+                return False, "path too short"
+            name = self._move_name(name)
+            self.moves_dir.mkdir(parents=True, exist_ok=True)
+            (self.moves_dir / f"{name}.json").write_text(json.dumps(
+                {"name": name, "points": [[round(x, 1), round(y, 1)] for x, y in points], "final_theta": theta}))
+            self._log(f"saved move '{name}' ({len(points)} points)")
+            return True, name
+
+    def list_moves(self) -> list[dict]:
+        out = []
+        for f in sorted(self.moves_dir.glob("*.json")) if self.moves_dir.exists() else []:
+            m = json.loads(f.read_text())
+            out.append({"name": m["name"], "points": m["points"], "final_theta": m["final_theta"]})
+        return out
+
+    def _load_move(self, name: str) -> dict:
+        f = self.moves_dir / f"{self._move_name(name)}.json"
+        if not f.exists():
+            raise ValueError(f"no saved move '{name}'")
+        return json.loads(f.read_text())
+
+    @staticmethod
+    def _move_start(m: dict) -> tuple[float, float, float]:
+        (x0, y0), far = m["points"][0], m["points"][min(len(m["points"]) - 1, 3)]
+        return x0, y0, math.atan2(far[1] - y0, far[0] - x0)
+
+    def move_to_start(self, rid: int, name: str):
+        """Park the car where the move begins, facing along it - ready to film."""
+        m = self._load_move(name)
+        return self.set_goal(rid, *self._move_start(m))
+
+    def play_move(self, rid: int, name: str):
+        """Drive a saved move. If the car is not already at its start (facing along it), it goes
+        there first, then follows the path."""
+        m = self._load_move(name)
+        x0, y0, th0 = self._move_start(m)
+        r = self.state.robots.get(rid) if self.state else None
+        if r is None:
+            return False, "robot not visible"
+        at_start = math.dist((r.x, r.y), (x0, y0)) < 40 and abs(math.remainder(r.theta - th0, 2 * math.pi)) < 0.45
+
+        def run():
+            if not at_start:
+                ok, _ = self.set_goal(rid, x0, y0, th0)
+                if not ok:
+                    return
+                gen, t0 = self._gen, time.monotonic()
+                while self.modes.get(rid) == "goal" and time.monotonic() - t0 < 40:
+                    time.sleep(0.05)
+                if self._gen != gen or self.modes.get(rid) != "idle":   # stopped or redirected meanwhile
+                    return
+                time.sleep(0.5)                           # a still, deliberate beat before it sets off
+                if self._gen != gen:
+                    return
+            self.set_path(rid, m["points"], m["final_theta"], from_start=True)
+            self._log(f"robot {rid}: playing move '{m['name']}'")
+
+        threading.Thread(target=run, daemon=True).start()
+        return True, "going to the start first" if not at_start else "playing"
 
     def drive(self, rid: int, left: float, right: float):
         """Manual driving; must be repeated (expires after 0.3 s, like a dead-man switch)."""
         with self.lock:
             self.manual[rid] = (float(left), float(right), time.monotonic())
             self.modes[rid] = "manual"
+            self._gen += 1
 
     def stop(self, rid: int | None = None):
         with self.lock:
             for i in ([rid] if rid is not None else list(set(self.modes) | set(self.robot_ids()))):
                 self.modes[i] = "idle"
                 self.manual.pop(i, None)
+            self._gen += 1
             self._log("stop all" if rid is None else f"robot {rid}: stop")
 
     def set_estop(self, on: bool):
         with self.lock:
             self.safety.estop = bool(on)
+            self._gen += 1
             if on:
                 for i in list(self.modes):
                     self.modes[i] = "idle"

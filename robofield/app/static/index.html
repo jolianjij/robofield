@@ -69,6 +69,16 @@ section h2 { font-size: 14px; margin: 0 0 10px; font-weight: 650; }
 .set .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; }
 .set .row span.lbl { width: 120px; color: var(--muted); }
 .set input[type=range] { flex: 1; }
+.moves .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 13px; }
+.moves input[type=text] { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; background: var(--panel); }
+.moves .mv { display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 8px; font-size: 13px; }
+.moves .mv.on { background: color-mix(in srgb, #ff9800 18%, transparent); }
+.moves .mv .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.moves .mv button { padding: 3px 9px; font-size: 12.5px; }
+.moves .mv button.play { background: var(--blue); color: #fff; border-color: var(--blue); }
+#moveMsg { color: var(--muted); font-size: 12.5px; min-height: 1.2em; }
+#caption { font-weight: 700; font-size: 15px; padding: 4px 14px; border-radius: 999px; background: var(--blue); color: #fff; }
+#caption.bad { background: var(--bad); } #caption.ok { background: var(--ok); }
 #log { font-size: 12.5px; color: var(--muted); margin: 0; padding-left: 16px; }
 kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 12px; }
 
@@ -82,6 +92,7 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
 <body>
 <header>
   <h1>RoboField Control Center</h1>
+  <span id="caption" hidden></span>
   <span id="modePill" class="pill">…</span>
   <span id="trackPill" class="pill">camera …</span>
   <span class="spacer"></span>
@@ -102,6 +113,7 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
       <button data-tool="goal">Go to pose</button>
       <button data-tool="path">Draw path</button>
       <label class="hint"><input type="checkbox" id="pathHeading"> turn to the last direction at the end</label>
+      <label class="hint" title="Draw a path without the car driving it - to design a move, then save it under Moves"><input type="checkbox" id="sketchOnly"> sketch only (car stays put)</label>
       <span class="hint" id="toolHint">Click a car to select it.</span>
     </div>
     <canvas id="map"></canvas>
@@ -110,6 +122,12 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4p
   <section class="panel">
     <h2>Camera</h2>
     <div id="camBox"><p class="empty">Start the control center with <code>--pi &lt;address&gt;</code> to see the Pi camera here.</p></div>
+    <h2 style="margin-top:16px">Moves</h2>
+    <div class="moves">
+      <div class="row"><input type="text" id="moveName" placeholder="name, e.g. hook" aria-label="Move name"><button id="moveSave" title="Save the last path drawn (or sketched) for the selected car">Save last path</button></div>
+      <div id="moveList"><p class="empty">No saved moves yet. Draw a path (tick "sketch only" to keep the car still), then save it here.</p></div>
+      <div id="moveMsg" role="status"></div>
+    </div>
     <h2 style="margin-top:16px">Safety</h2>
     <div class="set">
       <div class="row"><span class="lbl">Wall margin</span><input id="margin" type="range" min="20" max="150" step="5"><span id="marginVal" class="num"></span></div>
@@ -131,6 +149,9 @@ let S = null;                 // latest state from the server
 let selected = null;          // selected robot id
 let tool = "select";
 let drag = null;              // {kind, pts:[[x,y]...], start:[x,y], end:[x,y]}
+let sketch = null;             // last path sketched without driving: {pts, theta}
+let moves = [];               // saved moves from /api/moves
+let shownMove = null;         // name of the move previewed on the map
 let carIds = "";              // to rebuild the car list only when the set of cars changes
 const keys = new Set();
 
@@ -232,6 +253,15 @@ function draw() {
     ctx.fillStyle = css("--ink"); ctx.font = `600 ${12 * dpr}px system-ui`; ctx.textAlign = "center";
     ctx.fillText(r.name + (r.safety ? `  ⚠ ${r.safety}` : ""), lx, ly);
   });
+  // a sketched path and the previewed saved move
+  if (sketch) polyline(sketch.pts, "#ff980099", 3 * dpr, [4 * dpr, 4 * dpr]);
+  const mv = moves.find((m) => m.name === shownMove);
+  if (mv) {
+    polyline(mv.points, "#ff9800", 3 * dpr, [10 * dpr, 6 * dpr]);
+    const [p0, p1] = [mv.points[0], mv.points[Math.min(mv.points.length - 1, 3)]];
+    arrow(p0[0], p0[1], Math.atan2(p1[1] - p0[1], p1[0] - p0[0]), 70, "#ff9800", 3 * dpr);
+    const [a, b] = toPx(p0[0], p0[1]); ctx.fillStyle = "#ff9800"; ctx.beginPath(); ctx.arc(a, b, 6 * dpr, 0, 2 * Math.PI); ctx.fill();
+  }
   // what the user is drawing
   if (drag && drag.kind === "path") polyline(drag.pts, "#ff9800", 3 * dpr);
   if (drag && drag.kind === "goal") {
@@ -331,10 +361,14 @@ function renderChrome() {
     $("#speed").value = S.settings.speed_limit; $("#margin").value = S.settings.geofence_margin_mm; $("#avoid").checked = S.settings.avoid_collisions;
   }
   $("#speedVal").textContent = Math.round(S.settings.speed_limit * 100) + "%";
-  $("#marginVal").textContent = S.settings.geofence_margin_mm + " mm";
+  $("#marginVal").textContent = Math.round(S.settings.geofence_margin_mm) + " mm";
   $("#sepVal").textContent = `${S.settings.min_separation_mm} mm`;
   $("#log").innerHTML = S.log.slice().reverse().map((l) => `<li>${l}</li>`).join("");
-  if (!camInit && S.pi_preview) { camInit = true; $("#camBox").innerHTML = `<img id="cam" alt="Live view from the field camera" src="${S.pi_preview}">`; }
+  if (!camInit && S.pi_preview) {
+    camInit = true; $("#camBox").innerHTML = `<img id="cam" alt="Live view from the field camera" src="${S.pi_preview}">`;
+    // the Pi's stream can drop (tracker restarted, WiFi hiccup): keep reconnecting
+    $("#cam").addEventListener("error", (e) => setTimeout(() => { e.target.src = S.pi_preview + "?t=" + Date.now(); }, 2000));
+  }
 }
 $("#speed").addEventListener("input", (e) => api("/api/settings", { speed_limit: +e.target.value }));
 $("#margin").addEventListener("input", (e) => api("/api/settings", { geofence_margin_mm: +e.target.value }));
@@ -358,7 +392,7 @@ cv.addEventListener("pointerdown", (ev) => {
     if (best !== null) select(best);
     return;
   }
-  if (selected === null) { $("#toolHint").textContent = "Select a car first (click it in the list)."; return; }
+  if (selected === null && !(tool === "path" && $("#sketchOnly").checked)) { $("#toolHint").textContent = "Select a car first (click it in the list)."; return; }
   cv.setPointerCapture(ev.pointerId);
   drag = tool === "goal" ? { kind: "goal", start: p, end: p } : { kind: "path", pts: [p] };
 });
@@ -380,11 +414,51 @@ cv.addEventListener("pointerup", async () => {
   } else if (d.pts.length > 2) {
     const n = d.pts.length, a = d.pts[n - 2], b = d.pts[n - 1];
     const th = $("#pathHeading").checked ? Math.atan2(b[1] - a[1], b[0] - a[0]) : null;
-    res = await api("/api/path", { id: selected, points: d.pts, theta: th });
+    if ($("#sketchOnly").checked) { sketch = { pts: d.pts, theta: th }; moveMsg("Sketched. Name it and press Save last path."); }
+    else { sketch = null; res = await api("/api/path", { id: selected, points: d.pts, theta: th }); }
   }
   if (res && !res.ok) $("#toolHint").textContent = res.msg;
   draw();
 });
+
+// ------------------------------------------------------------------ caption (for filming: ?caption=Before&tone=bad)
+{
+  const q = new URLSearchParams(location.search), cap = q.get("caption");
+  if (cap) { const c = $("#caption"); c.textContent = cap; c.className = q.get("tone") || ""; c.hidden = false; }
+}
+
+// ------------------------------------------------------------------ saved moves
+function moveMsg(t) { $("#moveMsg").textContent = t; }
+function esc(t) { return String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+async function loadMoves() {
+  try { moves = (await (await fetch("/api/moves", { cache: "no-store" })).json()).moves; } catch (e) { return; }
+  const box = $("#moveList");
+  if (!moves.length) { box.innerHTML = '<p class="empty">No saved moves yet. Draw a path (tick "sketch only" to keep the car still), then save it here.</p>'; return; }
+  box.innerHTML = moves.map((m) => `<div class="mv${m.name === shownMove ? " on" : ""}" data-name="${esc(m.name)}">
+      <span class="nm" title="Show it on the map">${esc(m.name)}</span>
+      <button data-act="start" title="Drive to where the move begins and face along it">To start</button>
+      <button data-act="play" class="play" title="Drive the move (to its start first if needed)">Play</button></div>`).join("");
+}
+$("#moveList").addEventListener("click", async (e) => {
+  const row = e.target.closest(".mv"); if (!row) return;
+  const name = row.dataset.name, act = e.target.dataset.act;
+  if (!act) { shownMove = shownMove === name ? null : name; loadMoves(); draw(); return; }
+  if (selected === null) { moveMsg("Select a car first."); return; }
+  shownMove = name; loadMoves();
+  const res = await api(`/api/moves/${act}`, { id: selected, name });
+  moveMsg(res.ok ? (act === "play" ? `Playing "${name}": ${res.msg}` : `Going to the start of "${name}"`) : res.msg);
+});
+$("#moveSave").addEventListener("click", async () => {
+  const name = $("#moveName").value.trim();
+  if (!name) { moveMsg("Give the move a name first."); $("#moveName").focus(); return; }
+  const body = sketch ? { name, points: sketch.pts, theta: sketch.theta } : { id: selected === null ? 0 : selected, name };
+  const res = await api("/api/moves/save", body);
+  if (res.ok) { shownMove = res.msg; sketch = null; moveMsg(`Saved "${res.msg}".`); $("#moveName").value = ""; }
+  else moveMsg(res.msg);
+  await loadMoves(); draw();
+});
+$("#moveName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#moveSave").click(); });
+loadMoves();
 
 // ------------------------------------------------------------------ keyboard driving (dead-man: only while keys are held)
 window.addEventListener("keydown", (e) => {

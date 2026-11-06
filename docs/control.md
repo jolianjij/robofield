@@ -102,3 +102,20 @@ curves with numbers, so a change can be judged by data rather than by eye.
 - The firmware's brake flag only lasts one loop iteration; a real brake would stop turns sooner.
 - The tracker on the Pi and the laptop have unsynchronised clocks; synchronising them (NTP) would
   let the predictor use each frame's true capture time instead of a fixed delay.
+
+## Saved moves and filming
+
+Draw a path in the Control Center (tick **sketch only** to draw it without the car moving), name
+it and press **Save last path** in the **Moves** panel. Moves are kept in `config/moves/<name>.json`.
+**To start** parks the car at the move's first point, facing along it; **Play** drives it (going to
+the start first if needed). A replayed move is followed from its first point, so a loop that ends
+where it began is driven all the way round.
+
+`tools/film_move.py <move>` films one take: it parks the car (not recorded), starts recording the
+Pi camera (`record_camera.py`) and the Control Center page in a hidden Chrome (`record_screen.py`),
+plays the move, and stops both. `--style before` films it with the old controller (continuous
+turning, no delay prediction), `--style after` with the current one, `--style both` does the two
+from the same start. The page gets a Before / After label (`/?caption=...&tone=bad|ok`), and each
+take writes a `.json` next to its videos with the time, stop error, final heading error and
+wobble counts. The built-in `compare` move is an S-curve across the field ending in a 120 degree turn.
+

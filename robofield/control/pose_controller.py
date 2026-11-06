@@ -19,7 +19,7 @@ from robofield.core.state import RobotCommand
 from robofield.core.types import wrap_angle
 from .goto import GoToPoint, TurnTo
 from .kinematics import DiffDrive
-from .path import straight_path
+from .path import path_length, straight_path
 
 
 @dataclass
@@ -64,7 +64,6 @@ class PoseController:
 
     # ---------------------------------------------------------------- goals
     def _start(self, start_xy, align: bool):
-        gx, gy = self.path[-1]
         self._align = align
         self._idx = 0
         self._settled = 0
@@ -72,7 +71,9 @@ class PoseController:
         self._v = 0.0
         self.face.reset()
         self.turn.reset()
-        self.phase = "TURN" if math.dist(start_xy, (gx, gy)) > self.pos_tol else ("ALIGN" if align else "DONE")
+        # distance ALONG the path, not straight to its end: a loop ends where it starts
+        far = path_length(self.path, start_xy) > self.pos_tol
+        self.phase = "TURN" if far else ("ALIGN" if align else "DONE")
 
     def set_goal(self, x: float, y: float, theta: float, start_xy: tuple[float, float]):
         self.path = straight_path(start_xy, (x, y), step=40.0, field=self.field_mm, margin=self.margin)
@@ -80,9 +81,12 @@ class PoseController:
         self.goal = (gx, gy, theta)
         self._start(start_xy, True)
 
-    def set_path(self, points, start_xy: tuple[float, float], final_theta: float | None = None, spacing: float = 20.0):
+    def set_path(self, points, start_xy: tuple[float, float], final_theta: float | None = None, spacing: float = 20.0,
+                 nearest: bool = True):
         """Follow a drawn path (list of (x, y) mm). Points are kept inside the safe area and
-        resampled every `spacing` mm. With final_theta, the robot turns to it at the end."""
+        resampled every `spacing` mm. With final_theta, the robot turns to it at the end.
+        nearest=False follows it from its first point even if a later part passes closer to the car
+        (a replayed move that ends where it began)."""
         from .path import clamp_to_field
         pts = [clamp_to_field(x, y, self.field_mm, self.margin) for x, y in points]
         res = [pts[0]]
@@ -90,7 +94,7 @@ class PoseController:
             n = max(1, int(math.dist(a, b) // spacing))
             res += [(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n) for k in range(1, n + 1)]
         # start from the path point nearest the robot so it does not drive back to the beginning
-        i0 = min(range(len(res)), key=lambda i: math.dist(res[i], start_xy))
+        i0 = min(range(len(res)), key=lambda i: math.dist(res[i], start_xy)) if nearest else 0
         self.path = res[i0:] if i0 < len(res) - 1 else res[-1:]
         gx, gy = self.path[-1]
         self.goal = (gx, gy, final_theta if final_theta is not None else 0.0)
