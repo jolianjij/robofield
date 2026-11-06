@@ -1,8 +1,8 @@
 """Drive to a position AND an orientation, along a planned or drawn path. Three phases:
 
-  1. TURN    - turn in place to face the path (continuous turn, no waiting)
-  2. FOLLOW  - pure pursuit along the path to the goal point
-  3. ALIGN   - turn-stop-wait-nudge to the requested final heading (TurnTo)
+  1. TURN    - turn in place to face the path (TurnTo: pulse, wait, measure)
+  2. FOLLOW  - pure pursuit along the path to the goal point, on the delay-predicted pose
+  3. ALIGN   - turn in place to the requested final heading (TurnTo, tighter tolerance)
 
 FOLLOW is pure pursuit: aim at a "carrot" `lookahead` mm ahead on the path and drive the circular
 arc that reaches it (curvature = 2 sin(alpha) / distance). It is a geometric law, not a tuned
@@ -37,26 +37,28 @@ class PoseController:
     # TURN (face the path)
     face_tol: float = math.radians(20.0)
     # ALIGN (final heading) - see TurnTo
-    align_k: float = 3.5
-    align_kd: float = 1.0
-    align_w_cap_frac: float = 0.45
     ang_tol: float = math.radians(4.0)
-    fine_angle: float = math.radians(25.0)
     wait_s: float = 0.35
-    pulse_speed: float = 100.0
+    pulse_speed: float = 150.0     # mm/s of the driving wheel during a turn pulse
+    turn_style: float = 1.0        # 1: pulse-and-wait pivots; 0: the old continuous turn (to film the difference)
     settle_steps: int = 3          # ALIGN must report "done" this many steps in a row
     field_mm: float = 1000.0
     margin: float = 60.0
     phase: str = "IDLE"
     path: list = field(default_factory=list)
     goal: tuple = (0.0, 0.0, 0.0)
+    learned: dict = field(default_factory=dict)
 
     def __post_init__(self):
-        self.turn = TurnTo(self.dd, k=self.align_k, kd=self.align_kd, w_cap_frac=self.align_w_cap_frac,
-                           tolerance=self.ang_tol, fine_angle=self.fine_angle, wait_s=self.wait_s,
-                           pulse_speed=self.pulse_speed)
-        self.face = TurnTo(self.dd, k=self.align_k, kd=self.align_kd, w_cap_frac=self.align_w_cap_frac,
-                           tolerance=self.face_tol, continuous=True)
+        # self.learned: this car's turning model, learned by both turns from every pulse (pass the
+        # same dict to a rebuilt controller to keep what it learned)
+        mode = "pivot" if self.turn_style >= 0.5 else "continuous"
+        # final turn: shorter pulses, so a big turn is split across alternating wheels and the
+        # sideways shift of each pivot is mostly undone by the next
+        self.turn = TurnTo(self.dd, tolerance=self.ang_tol, wait_s=self.wait_s, pulse_speed=self.pulse_speed,
+                           pulse_max_s=0.35, learn=self.learned, mode=mode)
+        self.face = TurnTo(self.dd, tolerance=self.face_tol, wait_s=self.wait_s, pulse_speed=self.pulse_speed,
+                           learn=self.learned, mode=mode)
         self.goto = GoToPoint(self.dd, tolerance=self.pos_tol, pass_tol=self.pass_tol)   # kept for tools
         self._v = 0.0
 
