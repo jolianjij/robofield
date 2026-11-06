@@ -74,6 +74,7 @@ class ControlCenter:
         self._learned: dict[int, dict] = {}             # each car's learned turning model, kept across rebuilds
         self.last_path: dict[int, tuple] = {}           # rid -> (points, final_theta) of the last path drawn
         self._gen = 0                                   # bumped by every new order (lets a playing move notice a STOP)
+        self.parking: dict[int, bool] = {}              # rid -> driving to a move's start (two legs)
         self._dd0 = self.dd
         self.tuning: dict = self._default_tuning()
         self._load_saved_tuning()
@@ -167,6 +168,9 @@ class ControlCenter:
         self.dd = replace(self.dd, trim_left=self.tuning["trim_left"], trim_right=self.tuning["trim_right"])
         self.safety.dd = self.dd
         self.ctl.clear()    # next goal/path rebuilds every controller with the new values
+        for rid, mode in list(getattr(self, "modes", {}).items()):   # a move in progress just lost its controller: end it
+            if mode in ("goal", "path"):
+                self.modes[rid] = "idle"
 
     def _pose_controller_kwargs(self) -> dict:
         kw = {k: self.tuning[k] for k in _PC_KEYS}
@@ -281,10 +285,48 @@ class ControlCenter:
         (x0, y0), far = m["points"][0], m["points"][min(len(m["points"]) - 1, 3)]
         return x0, y0, math.atan2(far[1] - y0, far[0] - x0)
 
+    def _wait_goal(self, rid: int, timeout: float = 40.0) -> bool:
+        """Wait for the go-to just ordered to finish; False if it was stopped or replaced meanwhile."""
+        gen, t0 = self._gen, time.monotonic()
+        while self.modes.get(rid) == "goal" and time.monotonic() - t0 < timeout:
+            time.sleep(0.05)
+        return self._gen == gen and self.modes.get(rid) == "idle"
+
+    def _park(self, rid: int, x0: float, y0: float, th0: float, back: float = 120.0) -> bool:
+        """Drive to (x0, y0) facing th0, arriving straight along th0: first to a point `back` mm behind
+        it, then straight in. A big turn on the spot pivots about a wheel and shifts the car by
+        centimetres; this way the last turn is tiny and the car really ends up on the start."""
+        from robofield.control.path import clamp_to_field
+        r = self.state.robots.get(rid) if self.state else None
+        if r is None:
+            return False
+        c, s = math.cos(th0), math.sin(th0)
+        along = (r.x - x0) * c + (r.y - y0) * s          # < 0: behind the start
+        across = -(r.x - x0) * s + (r.y - y0) * c
+        lined_up = -2.5 * back < along < -40 and abs(across) < 25 and abs(math.remainder(r.theta - th0, 2 * math.pi)) < 0.3
+        if not lined_up:
+            bx, by = clamp_to_field(x0 - back * c, y0 - back * s, self.cfg["field"]["width_mm"], self.margin)
+            ok, _ = self.set_goal(rid, bx, by, th0)
+            if not ok or not self._wait_goal(rid):
+                return False
+            time.sleep(0.3)
+        ok, _ = self.set_goal(rid, x0, y0, th0)
+        return ok and self._wait_goal(rid)
+
     def move_to_start(self, rid: int, name: str):
         """Park the car where the move begins, facing along it - ready to film."""
         m = self._load_move(name)
-        return self.set_goal(rid, *self._move_start(m))
+        if self.state is None or self.state.robots.get(rid) is None:
+            return False, "robot not visible"
+        self.parking[rid] = True
+
+        def run():
+            try:
+                self._park(rid, *self._move_start(m))
+            finally:
+                self.parking[rid] = False
+        threading.Thread(target=run, daemon=True).start()
+        return True, "parking at the start"
 
     def play_move(self, rid: int, name: str):
         """Drive a saved move. If the car is not already at its start (facing along it), it goes
@@ -298,14 +340,13 @@ class ControlCenter:
 
         def run():
             if not at_start:
-                ok, _ = self.set_goal(rid, x0, y0, th0)
-                if not ok:
-                    return
-                gen, t0 = self._gen, time.monotonic()
-                while self.modes.get(rid) == "goal" and time.monotonic() - t0 < 40:
-                    time.sleep(0.05)
-                if self._gen != gen or self.modes.get(rid) != "idle":   # stopped or redirected meanwhile
-                    return
+                self.parking[rid] = True
+                try:
+                    if not self._park(rid, x0, y0, th0):      # stopped or redirected meanwhile
+                        return
+                finally:
+                    self.parking[rid] = False
+                gen = self._gen
                 time.sleep(0.5)                           # a still, deliberate beat before it sets off
                 if self._gen != gen:
                     return
@@ -395,6 +436,8 @@ class ControlCenter:
                         self.modes[rid] = mode = "idle"
                     else:
                         cmd = RobotCommand(l, rr)
+                elif mode in ("goal", "path") and rid not in self.ctl:
+                    self.modes[rid] = "idle"                # (cannot happen any more; never crash the loop on it)
                 elif mode in ("goal", "path") and r is not None and r.visible:
                     c = self.ctl[rid]
                     cmd = c.command(r.x, r.y, r.theta, r.omega, 1.0 / self.backend.control_hz)
@@ -477,6 +520,7 @@ class ControlCenter:
                     "battery_mv": car.status.battery_mv if car else (r.battery_mv if r else 0),
                     "rssi": car.status.rssi if car else None, "fw": car.status.fw_version if car else None,
                     "mode": mode, "phase": c.phase if c and mode in ("goal", "path") else "",
+                    "parking": bool(self.parking.get(rid)),
                     "goal": list(c.goal) if c and mode in ("goal", "path") else None,
                     "path": [list(pt) for pt in c.path] if c and mode in ("goal", "path") else [],
                     "trail": self.trails.get(rid, [])[-150:],

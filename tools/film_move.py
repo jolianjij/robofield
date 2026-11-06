@@ -59,6 +59,18 @@ def compare_move() -> dict:
     return {"name": "compare", "points": pts, "final_theta": math.radians(120)}
 
 
+def check_seen(base, rid):
+    """The tracker must be running and see the car - never film (or drive) on a stale position."""
+    for _ in range(50):
+        s = api(base, "/api/state")
+        r = next((r for r in s["robots"] if r["id"] == rid), None)
+        if s["tracker"]["ok"] and r and r["visible"]:
+            return r
+        time.sleep(0.2)
+    raise SystemExit("the tracker is down or does not see the car - nothing recorded "
+                     f"(tracker: {s['tracker']}; is the Pi on the network?)")
+
+
 def wait_idle(base, rid, timeout, log=None):
     """Wait for the car to start something and finish it; optionally record (t, x, y, theta, phase)."""
     t0, started = time.monotonic(), False
@@ -128,23 +140,33 @@ def take(a, base, move: dict, style: str):
     th0 = math.atan2(far[1] - y0, far[0] - x0)
 
     print(f"\n== {move['name']} / {style}")
+    r = check_seen(base, rid)
     api(base, "/api/tuning", STYLES["after"])        # park with the good controller (not recorded)
-    r = robot(base, rid)
-    if r is None or r["x"] is None:
-        raise SystemExit("the car is not visible to the camera")
-    if math.dist((r["x"], r["y"]), (x0, y0)) > 25 or abs(wrap(r["theta"] - th0)) > math.radians(6):
+    if math.dist((r["x"], r["y"]), (x0, y0)) > 30 or abs(wrap(r["theta"] - th0)) > math.radians(6):
         print("  parking at the start ...")
         res = api(base, "/api/moves/start", {"id": rid, "name": move["name"]})
         if not res.get("ok"):
             raise SystemExit(res.get("msg"))
-        wait_idle(base, rid, 45)
+        t0 = time.monotonic()
+        time.sleep(0.5)
+        while time.monotonic() - t0 < 60:                 # two legs: behind the start, then straight in
+            r = robot(base, rid)
+            if r and not r.get("parking") and r["mode"] == "idle":
+                break
+            time.sleep(0.1)
         time.sleep(0.8)
-    if style in STYLES:
-        api(base, "/api/tuning", STYLES[style])
+        r = check_seen(base, rid)
+        off_mm, off_deg = math.dist((r["x"], r["y"]), (x0, y0)), abs(math.degrees(wrap(r["theta"] - th0)))
+        print(f"  parked {off_mm:.0f} mm / {off_deg:.1f} deg from the start")
+        if off_mm > 45 or off_deg > 12:
+            raise SystemExit("could not park at the start - nothing recorded; try again")
 
-    procs = start_recorders(a, stem, style, stop)
-    log = []
+    procs = start_recorders(a, stem, style, stop)     # recording before the controller is switched,
+    log = []                                          # so a failed start never leaves it on "before"
     try:
+        if style in STYLES:
+            api(base, "/api/tuning", STYLES[style])
+        check_seen(base, rid)
         time.sleep(a.lead)
         print("  playing ...")
         res = api(base, "/api/moves/play", {"id": rid, "name": move["name"]})

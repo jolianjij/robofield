@@ -30,7 +30,16 @@ def main():
     a = ap.parse_args()
     out = Path(a.out or f"recordings/camera_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
     out.parent.mkdir(parents=True, exist_ok=True)
-    stream = urllib.request.urlopen(f"http://{a.pi}:{a.port}/", timeout=5)
+    stream = None
+    for _ in range(4):                                       # ride out a short WiFi hiccup
+        try:
+            stream = urllib.request.urlopen(f"http://{a.pi}:{a.port}/", timeout=5)
+            break
+        except OSError as e:
+            err = e
+            time.sleep(1)
+    if stream is None:
+        raise SystemExit(f"cannot reach the Pi camera stream at {a.pi}:{a.port}: {err}")
     buf, writer, frame, n = b"", None, None, 0
     t0 = time.monotonic()
     try:
