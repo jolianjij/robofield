@@ -64,10 +64,18 @@ class Race(Game):
         return s, lateral, heading
 
     # ---------------------------------------------------------------- Game interface
+    random_heading = True            # start facing anywhere, not along the track: the policy has to
+    lateral_frac = 0.6               # orient itself first; and anywhere across the lane (this fraction
+                                     # of the half width either side), like a car put down by hand
+
     def layout(self):
         start_s = self.rng.uniform(0, self.perimeter)
-        x, y, heading = self._pose_at(start_s)
-        self._raw_s_prev = start_s
+        cx, cy, heading = self._pose_at(start_s)
+        lat = self.rng.uniform(-1, 1) * self.lateral_frac * self.half_width
+        x, y = cx + lat * math.sin(heading), cy - lat * math.cos(heading)
+        if self.random_heading:
+            heading = self.rng.uniform(-math.pi, math.pi)
+        self._raw_s_prev, _, _ = self._project(x, y)
         self._progress = 0.0
         self._laps = 0
         self._off_track = False

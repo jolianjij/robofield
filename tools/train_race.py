@@ -31,18 +31,22 @@ from robofield.games import make_game  # noqa: E402
 
 def make_env(randomize: bool, seed: int):
     def _make():
-        return RoboFieldEnv(game="race", randomize=randomize, seed=seed)
+        # predict=True: observe the delay-predicted state, exactly as the real field reports it
+        return RoboFieldEnv(game="race", randomize=randomize, seed=seed, predict=True)
     return _make
 
 
 def train(args):
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import CheckpointCallback
-    from stable_baselines3.common.env_util import make_vec_env
+    from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    env = make_vec_env(make_env(not args.no_randomize, args.seed), n_envs=args.envs, seed=args.seed)
+    # one process per env (each with its own seed, so each draws different friction, delay, motor
+    # mismatch...), instead of all of them stepping in this one process
+    fns = [make_env(not args.no_randomize, args.seed + i) for i in range(args.envs)]
+    env = VecMonitor(SubprocVecEnv(fns) if args.envs > 1 else DummyVecEnv(fns))
     model = PPO("MlpPolicy", env, verbose=1, n_steps=args.n_steps, batch_size=args.batch_size,
                 tensorboard_log=str(out.parent / "tb") if args.tensorboard else None)
     ckpt = CheckpointCallback(save_freq=max(1, args.checkpoint_every // args.envs),
@@ -58,7 +62,8 @@ def evaluate_sim(args):
     from stable_baselines3 import PPO
 
     model = PPO.load(args.eval)
-    env = RoboFieldEnv(game="race", randomize=False, render_mode="rgb_array" if args.render else None)
+    env = RoboFieldEnv(game="race", randomize=args.randomize_eval, seed=args.seed + 1000, predict=True,
+                       render_mode="rgb_array" if args.render else None)
     wins, laps_total = 0, 0
     for ep in range(args.episodes):
         obs, info = env.reset()
@@ -101,43 +106,33 @@ def evaluate_real(args):
         if r is None or not r.visible:
             print("robot not visible, aborting without sending any command"); return
 
-        # The simulator always starts an episode with the robot already exactly ON the centerline,
-        # facing along the track (it can teleport into that pose); the real backend cannot
-        # teleport, and hand-placing a robot within a 124mm-wide corridor by eye is unreliable in
-        # practice (confirmed - repeated attempts landed just outside it). The policy was never
-        # trained on a position/heading this far from what it expects, and its behavior there is
-        # undefined, not just "worse" (one run froze at near-zero net motion for 39s straight).
-        # So instead of relying on manual placement, drive to the exact nearest centerline point
-        # with the already-confirmed-working PoseController before the policy ever sees an
-        # observation - wherever the robot starts, as long as it is roughly near the ring.
-        s_now, _, track_heading = game._project(r.x, r.y)
-        gx, gy, _ = game._pose_at(s_now)
-        print(f"driving to the exact centerline ({gx:.0f},{gy:.0f}) heading {math.degrees(track_heading):.0f} deg "
-              f"before starting the policy...")
-        pc = PoseController(dd, deadzone=deadzones_from_config(cfg), margin=safety_margin_mm(cfg))
-        pc.set_goal(gx, gy, track_heading, (r.x, r.y))
-        t_align = time.monotonic()
-        while time.monotonic() - t_align < 20 and not pc.done:
+        # Policies trained with random starts (the race's default now) orient themselves from any
+        # pose in the lane. --align first drives to the nearest centerline point facing along the
+        # track with the PoseController, for a policy trained only on clean starts.
+        if args.align:
+            s_now, _, track_heading = game._project(r.x, r.y)
+            gx, gy, _ = game._pose_at(s_now)
+            print(f"driving to the centerline ({gx:.0f},{gy:.0f}) facing {math.degrees(track_heading):.0f} deg first...")
+            pc = PoseController(dd, margin=safety_margin_mm(cfg))
+            pc.set_goal(gx, gy, track_heading, (r.x, r.y))
+            t_align = time.monotonic()
+            while time.monotonic() - t_align < 20 and not pc.done:
+                ws = backend.step()
+                r = ws.robots.get(args.robot)
+                if r is None or not r.visible:
+                    backend.apply({args.robot: RobotCommand()}); continue
+                backend.apply({args.robot: pc.command(r.x, r.y, r.theta, r.omega, 1 / backend.control_hz)})
+            backend.apply({args.robot: RobotCommand()})
             ws = backend.step()
             r = ws.robots.get(args.robot)
             if r is None or not r.visible:
-                backend.apply({args.robot: RobotCommand()}); continue
-            cmd = pc.command(r.x, r.y, r.theta, r.omega, 1 / backend.control_hz)
-            if args.car_speed_scale != 1.0:   # same uniform scale as the main loop below
-                cmd = RobotCommand(cmd.left * args.car_speed_scale, cmd.right * args.car_speed_scale,
-                                   cmd.gripper, cmd.leds)
-            backend.apply({args.robot: cmd})
-        backend.apply({args.robot: RobotCommand()})
-        ws = backend.step()
-        r = ws.robots.get(args.robot)
-        if r is None or not r.visible:
-            print("robot not visible after aligning, aborting"); return
-        s_now, lateral, _ = game._project(r.x, r.y)
-        print(f"aligned (heading {math.degrees(r.theta):.0f} deg vs target {math.degrees(track_heading):.0f} deg) "
-              f"- position ({r.x:.0f},{r.y:.0f}), {abs(lateral):.0f}mm off centerline "
-              f"(track corridor is +-{game.half_width:.0f}mm)")
-        if not args.ignore_off_track and abs(lateral) > game.half_width * 1.5:
-            print("robot is outside the track corridor - move it closer to the centerline and retry")
+                print("robot not visible, aborting"); return
+        s_now, lateral, track_heading = game._project(r.x, r.y)
+        print(f"start ({r.x:.0f},{r.y:.0f}) facing {math.degrees(r.theta):.0f} deg (track goes "
+              f"{math.degrees(track_heading):.0f} deg), {abs(lateral):.0f} mm off the centerline "
+              f"(lane is +-{game.half_width:.0f} mm)")
+        if not args.ignore_off_track and abs(lateral) > game.half_width:
+            print("the robot is outside the lane - put it on the outer ring of tiles and retry")
             return
         print("starting the policy")
 
@@ -166,22 +161,13 @@ def evaluate_real(args):
             cmd = {args.robot: RobotCommand(left, right)}
             safe_cmd = safety.filter(ws, cmd, tracker_ok=True, now=time.monotonic())
             if args.car_speed_scale != 1.0:
-                # a uniform scale of both wheels, same as CarProfile.max_speed in the web GUI
-                # (ControlCenter.step_once): unlike Safety's speed_limit, which clips v and w
-                # separately and can distort the intended turning curvature, this keeps the
-                # exact ratio between the two wheels - just slower. Confirmed on the real car
-                # that go-to-pose only stayed on track with this ALSO applied, on top of Safety.
-                #
-                # Lift back above the dead zone afterward (same as every controller in goto.py
-                # does internally): PoseController's own commands tend to already sit near full
-                # scale, so a 10% cut still clears the dead zone, but the policy's raw actions
-                # are more varied and a flat 10% cut can attenuate plenty of them below the
-                # ~8% minimum duty that actually moves a wheel - confirmed on the real car as
-                # the robot freezing at ~zero net motion for 40+ seconds despite a clean start.
+                # scale the body motion (same as the Control Center's per-car speed slider): on this
+                # car's non-linear motors a per-wheel multiply bends the path, while scaling v and
+                # w together keeps the turn ratio - the same path, just slower
                 c = safe_cmd[args.robot]
-                scaled = RobotCommand(c.left * args.car_speed_scale, c.right * args.car_speed_scale,
-                                       c.gripper, c.leds)
-                safe_cmd = {args.robot: compensate_deadzone(scaled, deadzones_from_config(cfg))}
+                v, w = dd.forward(c.left, c.right)
+                safe_cmd = {args.robot: RobotCommand(*dd.inverse(v * args.car_speed_scale, w * args.car_speed_scale),
+                                                      c.gripper, c.leds)}
             backend.apply(safe_cmd)
             game.reward(ws, ws, safe_cmd)  # Race.reward only reads `ws`; called for its lap/progress side effects
             if time.monotonic() - last_print > 1.0:
@@ -204,7 +190,7 @@ def evaluate_real(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--timesteps", type=int, default=1_000_000)
-    ap.add_argument("--envs", type=int, default=4, help="parallel sim environments")
+    ap.add_argument("--envs", type=int, default=12, help="parallel sim environments (one process each)")
     ap.add_argument("--n-steps", type=int, default=512, help="PPO rollout length per env per update")
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--checkpoint-every", type=int, default=50_000)
@@ -221,6 +207,10 @@ def main():
     ap.add_argument("--speed-limit", type=float, default=0.4,
                     help="real only: fraction of top speed, on top of the policy's own output (default 0.4, cautious)")
     ap.add_argument("--max-seconds", type=float, default=120.0, help="real only: hard time limit")
+    ap.add_argument("--align", action="store_true",
+                    help="real only: drive to the centerline facing along the track before starting")
+    ap.add_argument("--randomize-eval", action="store_true",
+                    help="sim evaluation with domain randomization (friction, delay, motors...)")
     ap.add_argument("--no-reverse", action="store_true",
                     help="real only: clamp out any net-backward body speed (see evaluate_real docstring)")
     ap.add_argument("--car-speed-scale", type=float, default=1.0,
