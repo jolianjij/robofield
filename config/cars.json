@@ -20,7 +20,7 @@
         255
       ]
     ],
-    "max_speed": 0.1,
+    "max_speed": 1.0,
     "gripper": 0,
     "enabled": true
   },

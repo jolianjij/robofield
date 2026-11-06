@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 rl = ["gymnasium>=0.29", "pettingzoo>=1.24"]
+sim = ["mujoco>=3.0"]
 train = ["stable-baselines3>=2.3", "torch>=2.2"]
 
 [tool.setuptools.packages.find]
