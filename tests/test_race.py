@@ -27,17 +27,16 @@ def test_race_scripted_lap_completes_without_leaving_track():
     game.seed(0)
     layout = game.layout()
     b = SimBackend(CFG, 1, seed=0, randomize=False, markers=False)
+    b.predict = True
     s = b.reset(layout)
-    dd = DiffDrive.from_config(CFG)
-    pc = PoseController(dd, deadzone=CFG["robot_model"]["deadzone"])
+    pc = PoseController(DiffDrive.from_config(CFG))
+    r = s.robots[0]
+    s0, _, _ = game._project(r.x, r.y)
+    centerline = [game._pose_at(s0 + d)[:2] for d in range(0, int(3.1 * game.perimeter), 20)]
+    pc.set_path(centerline, (r.x, r.y))                     # 3 laps of pure pursuit, corners and all
     prev = s
     for i in range(2700):
         r = s.robots[0]
-        sval, _, _ = game._project(r.x, r.y)
-        if i % 15 == 0:
-            tx, ty, th = game._pose_at(sval + 220)
-            pc.set_goal(tx, ty, th, (r.x, r.y))
-            pc.phase, pc._idx, pc._align = "FOLLOW", len(pc.path) - 1, False
         cmd = pc.command(r.x, r.y, r.theta, r.omega, 1 / 30)
         b.apply({0: cmd})
         s = b.step()

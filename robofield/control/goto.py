@@ -1,4 +1,11 @@
-"""Go-to-point controller for a differential-drive robot (polar-coordinate law)."""
+"""Point and heading controllers for a differential-drive robot.
+
+Both are designed around two facts measured on the real car (2026-11-06):
+  - the loop delay (command -> wheels -> camera -> laptop) is ~0.2 s, so the pose the controller
+    sees is old; the backend predicts it forward, but a prediction is only as good as its model;
+  - the car cannot move slowly: the smallest command already drives a wheel at ~100 mm/s
+    (robot_model.speed_curve), so "a little correction" is never small.
+"""
 from __future__ import annotations
 
 import math
@@ -11,9 +18,9 @@ from .pid import PID
 
 
 def compensate_deadzone(cmd: RobotCommand, deadzone: float | tuple[float, float], eps: float = 1e-3) -> RobotCommand:
-    """Lift small non-zero wheel commands above the motor dead zone so slow, precise moves happen.
-    `deadzone` may be a single value (both wheels) or a (left, right) pair for motors that do not
-    start moving at the same duty (measure each wheel separately, see docs/tomorrow.md)."""
+    """Lift small non-zero wheel commands above a motor dead zone the laptop has to handle itself.
+    The current car's firmware already does this per wheel, so its configured dead zone is 0 and
+    this is a no-op; kept for cars whose firmware does not."""
     dzl, dzr = deadzone if isinstance(deadzone, tuple) else (deadzone, deadzone)
     f = lambda u, dz: 0.0 if abs(u) < eps else math.copysign(dz + (1 - dz) * abs(u), u)
     return RobotCommand(f(cmd.left, dzl), f(cmd.right, dzr), cmd.gripper, cmd.leds)
@@ -21,33 +28,20 @@ def compensate_deadzone(cmd: RobotCommand, deadzone: float | tuple[float, float]
 
 @dataclass
 class GoToPoint:
-    """Heading control is now a PID with derivative-on-measurement (`-kd * measured_omega`
-    instead of differencing the noisy angle error), so it damps using the robot's actual,
-    currently-measured turn rate. This is a genuine improvement for a system this noisy and
-    laggy, but it was NOT the cause of the violent oscillation reported earlier: that was
-    `DiffDrive.inverse()` commanding turns in the opposite sign from `forward()` (see kinematics.py
-    and TurnTo's docstring) - every heading correction was reinforcing whatever rotation already
-    existed rather than opposing it, which looks exactly like an undampable oscillation no matter
-    how the gains are tuned. With that fixed, plain proportional control (as this had originally)
-    converges in well under a second in simulation; the PID here is extra robustness headroom for
-    the real camera's latency and noise, not a replacement for fixing the sign bug."""
+    """Drive to a point. Speed falls off with distance and with heading error; the heading term
+    is a PID damped on the measured turn rate. Arriving at speed, the robot accepts a goal it has
+    just passed (within `pass_tol`) instead of reversing back and forth over it: with a ~100 mm/s
+    minimum speed and a 0.2 s delay, chasing the last few millimetres is what makes it hunt."""
     dd: DiffDrive
     k_rho: float = 2.5          # 1/s, forward gain
     k_alpha: float = 3.5        # 1/s, heading gain (PID kp)
     kd_alpha: float = 1.0       # damping on the measured turn rate (PID kd)
-    w_cap_frac: float = 0.45    # heading-rate command capped to this fraction of dd.max_omega:
-                                 # confirmed on the real car (2026-11-05) that the sim-tuned gains
-                                 # above were too aggressive for its real inertia/friction/latency -
-                                 # violent, physically damaging oscillation on ALIGN, not just a slow
-                                 # settle. Lower kp, higher kd, and a real speed cap all reduce how
-                                 # much kinetic energy any remaining overshoot can carry. Re-sweep on
-                                 # the actual car (not just in sim) before trusting any gain change -
-                                 # that is what caught this in the first place.
-    v_max: float = 250.0        # mm/s
-    tolerance: float = 10.0     # mm
-    slow_radius: float = 80.0   # mm, ramp the speed down inside this radius
-    allow_reverse: bool = True
-    deadzone: float | tuple[float, float] = 0.0   # set from the robot model; small commands are lifted above it
+    w_cap_frac: float = 0.45    # heading-rate command capped to this fraction of dd.max_omega
+    v_max: float = 200.0        # mm/s
+    tolerance: float = 12.0     # mm
+    pass_tol: float = 20.0      # mm: a goal this close and already behind the robot counts as reached
+    allow_reverse: bool = True  # back up toward a goal that is well behind
+    deadzone: float | tuple[float, float] = 0.0
 
     def __post_init__(self):
         cap = self.w_cap_frac * self.dd.max_omega
@@ -58,22 +52,20 @@ class GoToPoint:
 
     def command(self, x: float, y: float, th: float, gx: float, gy: float,
                 omega: float = 0.0, dt: float = 1 / 30) -> tuple[RobotCommand, bool]:
-        # clamp to what the robot can physically do: a bad camera detection or an EKF re-lock can
-        # report a momentary omega far beyond max_omega, and the PID's derivative term would react
-        # to that spike as if it were real (confirmed on the real car - occasional implausible
-        # omega readings during ALIGN made the settle noisier than in sim, though it still converged)
+        # a bad detection or EKF re-lock can report an impossible turn rate; don't let the
+        # derivative term react to it
         omega = max(-self.dd.max_omega, min(self.dd.max_omega, omega))
         dx, dy = gx - x, gy - y
         rho = math.hypot(dx, dy)
-        if rho < self.tolerance:
+        alpha = wrap_angle(math.atan2(dy, dx) - th)
+        behind = abs(alpha) > math.pi / 2
+        if rho < self.tolerance or (behind and rho < self.pass_tol):
             self.reset()
             return RobotCommand(), True
-        alpha = wrap_angle(math.atan2(dy, dx) - th)
         direction = 1.0
-        if self.allow_reverse and abs(alpha) > math.pi / 2:      # target behind: drive backwards
+        if self.allow_reverse and behind:
             direction, alpha = -1.0, wrap_angle(alpha + math.pi)
-        v = min(self.v_max, self.k_rho * rho) * math.cos(alpha) ** 2
-        v *= min(1.0, rho / self.slow_radius) ** 0.5 if rho < self.slow_radius else 1.0
+        v = min(self.v_max, self.k_rho * rho) * max(0.0, math.cos(alpha)) ** 2
         w = self._pid.step(alpha, omega, dt)
         left, right = self.dd.inverse(direction * v, w)
         return compensate_deadzone(RobotCommand(left, right), self.deadzone), False
@@ -81,83 +73,103 @@ class GoToPoint:
 
 @dataclass
 class TurnTo:
-    """Turn in place to a target heading.
+    """Turn in place to a heading: turn, stop, wait, nudge.
 
-    The violent, never-settling oscillation reported against this controller traced back to
-    `DiffDrive.inverse()`: it commanded turns with the opposite sign from `forward()` (confirmed
-    in simulation - commanding +2 rad/s produced a true, physical -1.66 rad/s). A closed-loop
-    heading controller with that bug doesn't just turn the wrong way once: every correction
-    reinforces whatever rotation already exists, since the controller "sees" its own commands as
-    opposing a spin that they are actually accelerating. That is indistinguishable from a
-    sustained limit cycle no matter how the gains are tuned - and was reproduced here even feeding
-    the controller the true, noise-free pose and turn rate, which is what showed it was a sign bug
-    and not a tuning or estimation problem. See kinematics.py's `inverse()` docstring for the fix.
+    Far from the target (outside `fine_angle`) it turns continuously, steering on the PREDICTED
+    heading, so it stops early enough to account for the delay. Inside `fine_angle` it never turns
+    continuously: it stops, waits `wait_s` (longer than the loop delay, so the camera has caught up
+    and the robot has really stopped), then makes one short pulse sized for the remaining error,
+    and waits again. Each pulse's result teaches the next one (`pulse_s_per_rad` adapts), so the
+    nudges stay right as the battery, floor and motors change.
 
-    With that fixed, plain proportional control converges in well under a second in simulation.
-    The PID here (derivative-on-measurement: `-kd * measured_omega`, not a differenced error) is
-    a genuine but secondary improvement: real camera latency and pose noise are worse than sim, so
-    some damping on the actual measured turn rate gives more margin before a real robot's
-    oscillation would need retuning. Re-sweep `k` / `kd` on the real car; inertia, friction and
-    true latency all differ from sim (see docs/tomorrow.md for the sweep method and results).
+    Why not a continuous controller all the way in: with a ~0.2 s delay a continuous correction is
+    always acting on where the robot WAS, and since the slowest it can turn is several rad/s (the
+    motors cannot crawl), every correction overshoots the other way - the left-right oscillation
+    seen on the real car. Waiting out the delay between moves removes the stale-data problem
+    entirely; the predictor only has to be good enough to get the coarse turn close.
 
-    Inside `creep_angle` it switches to short power pulses separated by pauses ("creep-pulse"),
-    because a continuous command big enough to clear the motor's dead zone overshoots a target
-    that is only a few degrees away; the pause lets the robot coast to a stop between pulses
-    instead of oscillating around the target. Creep only engages below `creep_omega_max` too: a
-    caller can start this close to the target while still spinning fast (e.g. PoseController
-    handing off from FOLLOW to ALIGN) and creep's own pulses are far too weak to brake that, so
-    without the speed gate it just sails through the target repeatedly instead of stopping. The
-    PID keeps braking (using its real kd authority) until the spin has actually died down."""
+    With `continuous=True` (used to face along a path before driving) it just turns until within
+    `tolerance`, with no waiting or pulses."""
     dd: DiffDrive
-    k: float = 3.5              # 1/s, PID kp
+    k: float = 3.5              # 1/s, coarse turn PID kp
     kd: float = 1.0             # damping on the measured turn rate
-    w_cap_frac: float = 0.45    # commanded turn rate capped to this fraction of dd.max_omega - see
-                                 # GoToPoint's docstring: confirmed on the real car that the
-                                 # sim-tuned, uncapped gains caused violent, physically damaging
-                                 # oscillation; this is a safety margin, not just a tuning choice.
-    tolerance: float = math.radians(6.0)   # not tighter: real camera/marker heading noise is
-                                            # itself several degrees, so a tighter target just
-                                            # means the controller never stops "seeing" itself
-                                            # as off and keeps re-correcting - confirmed on the
-                                            # real car as persistent oscillation / never settling.
+    w_cap_frac: float = 0.45    # coarse turn rate cap, fraction of dd.max_omega
+    tolerance: float = math.radians(4.0)
     deadzone: float | tuple[float, float] = 0.0
-    creep_angle: float = math.radians(8.0)    # below this AND slow enough, switch to creep-pulse
-    creep_omega_max: float = 1.0               # rad/s: creep's weak pulses can't brake anything faster
-    creep_power: float | None = None          # None = just above the dead zone (see __post_init__)
-    pulse_on_s: float = 0.09
-    pulse_off_s: float = 0.12
+    fine_angle: float = math.radians(25.0)
+    wait_s: float = 0.35
+    pulse_speed: float = 100.0           # wheel speed during a nudge (mm/s); the car's slowest
+    pulse_s_per_rad: float = 0.25        # first guess; learned from every nudge
+    pulse_min_s: float = 0.03
+    pulse_max_s: float = 0.25
+    still_omega: float = 0.4             # rad/s: below this the robot counts as stopped
+    continuous: bool = False
     _t: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self):
         cap = self.w_cap_frac * self.dd.max_omega
         self._pid = PID(kp=self.k, kd=self.kd, out_min=-cap, out_max=cap)
-        if self.creep_power is None:
-            dzl, dzr = self.deadzone if isinstance(self.deadzone, tuple) else (self.deadzone, self.deadzone)
-            self.creep_power = max(dzl, dzr) * 1.15
+        self.reset()
 
-    def reset(self) -> None:
+    def reset(self, wait: bool = False) -> None:
+        """wait=True: start by letting the robot settle (e.g. right after it stopped driving)."""
         self._pid.reset()
-        self._t = 0.0
+        self.state = "WAIT" if wait else "DECIDE"
+        self._t0 = self._t
+        self._pulse = None          # (length s, direction, error before) of the last nudge
 
-    def _creep(self, e: float, dt: float) -> RobotCommand:
-        self._t += dt
-        on = (self._t % (self.pulse_on_s + self.pulse_off_s)) < self.pulse_on_s
-        if not on:
-            return RobotCommand()
-        left, right = self.dd.inverse(0.0, math.copysign(1.0, e))
-        s = max(abs(left), abs(right), 1e-9)
-        return RobotCommand(left / s * self.creep_power, right / s * self.creep_power)
+    def _turn(self, w: float) -> RobotCommand:
+        left, right = self.dd.inverse(0.0, w)
+        return RobotCommand(left, right)
 
     def command(self, th: float, target: float, omega: float = 0.0, dt: float = 1 / 30) -> tuple[RobotCommand, bool]:
-        # see GoToPoint.command: clamp a possibly glitchy sensor reading to what's physically possible
         omega = max(-self.dd.max_omega, min(self.dd.max_omega, omega))
+        self._t += dt
         e = wrap_angle(target - th)
+        if self.continuous:
+            if abs(e) < self.tolerance:
+                self._pid.reset()
+                return RobotCommand(), True
+            return self._turn(self._pid.step(e, omega, dt)), False
+
+        if self.state == "PULSE":
+            length, direction, _ = self._pulse
+            if self._t - self._t0 < length:
+                return self._turn(direction * 2 * self.pulse_speed / self.dd.track_mm), False
+            self.state, self._t0 = "WAIT", self._t
+            return RobotCommand(), False
+
+        if self.state == "WAIT":
+            if self._t - self._t0 < self.wait_s or abs(omega) > self.still_omega:
+                return RobotCommand(), False
+            if self._pulse is not None:                       # learn from the last nudge
+                length, direction, e_before = self._pulse
+                moved = (e_before - e) * direction            # rad turned toward the target
+                if moved > math.radians(0.5):
+                    seen = length / moved
+                    self.pulse_s_per_rad = min(2.0, max(0.02, 0.5 * self.pulse_s_per_rad + 0.5 * seen))
+                self._pulse = None
+            self.state = "DECIDE"
+
+        if self.state == "DONE":
+            if abs(e) < 1.5 * self.tolerance:
+                return RobotCommand(), True
+            self.state = "DECIDE"
+
+        if self.state == "TURN" and abs(e) <= self.fine_angle:   # close: stop and look again
+            self._pid.reset()
+            self.state, self._t0 = "WAIT", self._t
+            return RobotCommand(), False
+
+        # DECIDE (or still turning)
         if abs(e) < self.tolerance:
-            self.reset()
+            self.state = "DONE"
             return RobotCommand(), True
-        if abs(e) < self.creep_angle and abs(omega) < self.creep_omega_max:
-            return self._creep(e, dt), False
-        self._t = 0.0
-        w = self._pid.step(e, omega, dt)
-        left, right = self.dd.inverse(0.0, w)
-        return compensate_deadzone(RobotCommand(left, right), self.deadzone), False
+        if abs(e) > self.fine_angle:
+            self.state = "TURN"
+            return self._turn(self._pid.step(e, omega, dt)), False
+        length = min(self.pulse_max_s, max(self.pulse_min_s, self.pulse_s_per_rad * abs(e)))
+        direction = 1.0 if e > 0 else -1.0
+        self._pulse = (length, direction, e)
+        self.state, self._t0 = "PULSE", self._t
+        return self._turn(direction * 2 * self.pulse_speed / self.dd.track_mm), False

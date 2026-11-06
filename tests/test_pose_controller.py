@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 pytest.importorskip("mujoco")
-from robofield.control import DiffDrive, PoseController, RobotEKF, straight_path  # noqa: E402
-from robofield.core import load_config  # noqa: E402
+from robofield.control import DiffDrive, PoseController, straight_path  # noqa: E402
+from robofield.core import RobotCommand, load_config  # noqa: E402
 from robofield.core.types import wrap_angle  # noqa: E402
 from robofield.sim.backend import SimBackend  # noqa: E402
 
@@ -20,34 +20,28 @@ def test_straight_path_stays_inside_margin():
 
 
 def test_pose_controller_reaches_position_and_heading():
+    # The sim reproduces the real car's measured motor curve (no crawling below ~100 mm/s) and its
+    # ~0.2 s loop delay; the controller steers on the same delay-predicted state as on the field.
     b = SimBackend(CFG, 1, seed=5, randomize=True, markers=False)
+    b.predict = True
     dd = DiffDrive.from_config(CFG)
     rng = np.random.default_rng(3)
     for _ in range(6):
         start = (*rng.uniform(150, 850, 2), rng.uniform(-math.pi, math.pi))
         goal = (*rng.uniform(150, 850, 2), rng.uniform(-math.pi, math.pi))
         s = b.reset({"robots": {0: start}})
-        ekf, pc = RobotEKF(), PoseController(dd, deadzone=CFG["robot_model"]["deadzone"])
+        pc = PoseController(dd)
         pc.set_goal(*goal, (s.robots[0].x, s.robots[0].y))
-        # 1200, not 900: the controller's default gains were deliberately slowed down and
-        # turn-rate-capped after the real car showed violent oscillation with the faster,
-        # uncapped gains the sim sweep alone had found (see goto.py). Safety over speed.
-        for _ in range(1200):
-            r = s.robots[0]; ekf.update(s.t, r.x, r.y, r.theta)
-            x, y, th, _, w = ekf.predicted(b.p["latency"])
-            cmd = pc.command(x, y, th, w, 1 / CFG["control"]["rate_hz"])
+        for _ in range(900):
+            r = s.robots[0]
+            cmd = pc.command(r.x, r.y, r.theta, r.omega, 1 / CFG["control"]["rate_hz"])
             if pc.done:
                 break
             b.apply({0: cmd}); s = b.step()
+        for _ in range(15):                                  # let it come to rest
+            b.apply({0: RobotCommand()}); b.step()
         tx, ty, tth = b.true_pose(0)
         gx, gy, gth = pc.goal
         assert pc.done
-        # 45mm / 12deg, not the original 20mm / 4deg: the default gains were deliberately
-        # slowed and turn-rate-capped after the real car showed violent, physically damaging
-        # oscillation with the faster, uncapped gains a sim-only sweep had found (see goto.py).
-        # Safety over precision. ALIGN also has a hard time ceiling (pose_controller.py) so a
-        # rare, slow-to-settle run (simulator variance under domain randomization was observed
-        # to make the same seeds settle in very different times run to run) cannot drift or
-        # spin indefinitely, but it can still land a bit short of a quick, clean settle.
-        assert math.hypot(tx - gx, ty - gy) < 45
-        assert abs(math.degrees(wrap_angle(tth - gth))) < 12
+        assert math.hypot(tx - gx, ty - gy) < 25
+        assert abs(math.degrees(wrap_angle(tth - gth))) < 6

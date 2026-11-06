@@ -22,6 +22,7 @@ from robofield.core.backend import Backend
 from robofield.core.state import ObjectState, RobotCommand, RobotState, WorldState
 from robofield.core.types import wrap_angle
 from robofield.control.kinematics import DiffDrive, deadzones_from_config
+from robofield.control.predictor import LatencyPredictor
 from .scene import MM, build_scene
 
 
@@ -55,7 +56,20 @@ class SimBackend(Backend):
         self._base_friction = self.model.geom_friction.copy()
         self._base_mass = self.model.body_mass.copy()
         self._renderer = None
+        # Same delay prediction as the real field (robofield.control.predictor). Off by default so
+        # RL observations stay raw; the Control Center switches it on.
+        self.predict = False
+        self.predictor = LatencyPredictor(self.dd, self.nominal["latency"])
+        self._latency_set = False
         self.reset()
+
+    @property
+    def latency(self) -> float:
+        return self.predictor.latency
+
+    @latency.setter
+    def latency(self, value: float) -> None:
+        self.predictor.latency, self._latency_set = float(value), True
 
     # ---------------------------------------------------------------- episode
     def _draw_params(self):
@@ -66,7 +80,7 @@ class SimBackend(Backend):
         self.model.body_mass[:] = self._base_mass
         if self.randomize:
             r = self.rng
-            p["latency"] = r.uniform(0.04, 0.12)
+            p["latency"] = r.uniform(0.15, 0.28)                          # measured ~0.2 s on the real field
             # jitter each wheel's dead zone independently around its own measured nominal
             p["deadzone"] = np.clip(p["deadzone"] * r.uniform(0.7, 1.3, size=(self.n, 2)), 0.0, 0.5)
             p["gain"] = r.uniform(0.88, 1.12, size=(self.n, 2))          # unmatched motors: the car drifts
@@ -78,6 +92,9 @@ class SimBackend(Backend):
                 self.model.body_mass[b] = self._base_mass[b] * r.uniform(0.9, 1.25)
         self.p = p
         self._delay = max(0, round(p["latency"] * self.control_hz))
+        if not self._latency_set:
+            self.predictor.latency = self._delay / self.control_hz
+        self.predictor._sent.clear()
 
     def _random_layout(self):
         poses, tries = {}, 0
@@ -117,12 +134,15 @@ class SimBackend(Backend):
         for rid, c in commands.items():
             if 0 <= rid < self.n:
                 self._cmd[rid] = c.clipped()
+                self.predictor.record(rid, self._t, self._cmd[rid].left, self._cmd[rid].right)
 
     def _duty(self, u: float, dz: float, gain: float) -> float:
-        """Command -> motor duty: dead zone (the motor does not move below it) and gain mismatch."""
-        if abs(u) < dz:
+        """Command -> motor drive: dead zone, the measured speed-per-command curve of the real
+        car (robot_model.speed_curve - its firmware lifts every non-zero command above the motor
+        dead zone, so the smallest command already drives ~100 mm/s), and gain mismatch."""
+        if abs(u) < max(dz, 1e-4):
             return 0.0
-        return max(-1.0, min(1.0, u * gain))
+        return max(-1.0, min(1.0, self.dd.wheel_speed(u) / self.dd.max_wheel_speed * gain))
 
     def step(self) -> WorldState:
         self._queue.append(dict(self._cmd))
@@ -161,8 +181,11 @@ class SimBackend(Backend):
             dof = self._dof[i]
             vx, vy = self.data.qvel[dof] / MM, self.data.qvel[dof + 1] / MM
             v = vx * math.cos(th) + vy * math.sin(th)
-            ws.robots[i] = RobotState(i, x + self.rng.normal(0, nx), y + self.rng.normal(0, nx),
-                                      wrap_angle(th + self.rng.normal(0, nt)), v, self.data.qvel[dof + 5], True, 11100, self._t)
+            mx, my, mth = x + self.rng.normal(0, nx), y + self.rng.normal(0, nx), wrap_angle(th + self.rng.normal(0, nt))
+            w = self.data.qvel[dof + 5]
+            if self.predict:
+                mx, my, mth, v, w = self.predictor.predict(i, self._t, mx, my, mth, v, w)
+            ws.robots[i] = RobotState(i, mx, my, mth, v, w, True, 11100, self._t)
         for oid, (kind, adr) in self._obj.items():
             ws.objects[oid] = ObjectState(oid, kind, self.data.qpos[adr] / MM, self.data.qpos[adr + 1] / MM, 0.0, True, self._t)
         return ws
