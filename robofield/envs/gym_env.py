@@ -13,13 +13,16 @@ class RoboFieldEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 30}
 
     def __init__(self, game: str = "goto", config: str | dict = "config/field.yaml", backend=None,
-                 randomize: bool = True, seed: int = 0, render_mode: str | None = None):
+                 randomize: bool = True, seed: int = 0, render_mode: str | None = None, predict: bool = False):
+        """predict=True: observe the delay-predicted state (robofield.control.predictor), as the real
+        field reports it, so a policy trained here sees the delay the same way it will on the car."""
         self.cfg = load_config(config) if isinstance(config, str) else config
         self.game = make_game(game)
         if backend is None:
             from robofield.sim.backend import SimBackend
             backend = SimBackend(self.cfg, self.game.n_robots, self.game.objects, seed=seed, randomize=randomize,
                                  markers=render_mode is not None)
+            backend.predict = predict
         self.backend = backend
         self.render_mode = render_mode
         n = self.game.obs_dim
