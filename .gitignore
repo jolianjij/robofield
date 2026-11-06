@@ -13,3 +13,4 @@ calibration/*.npz
 firmware/car/include/secrets.h
 .claude/
 models/
+firmware/car_esp8266/robofield_car/secrets.h

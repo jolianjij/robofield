@@ -1,4 +1,26 @@
 # RoboField / RLCR Framework — project context for Claude Code
+
+## Current state (2026-11-06) — read this first; the older notes below are kept as history
+
+- **Firmware is in the repo:** `firmware/car_esp8266/robofield_car/` is the sketch the car runs
+  (ESP8266 D1 Mini + DRV8833, fw 5). `secrets.h` is git-ignored; copy `secrets.example.h`.
+  `firmware/car/` (ESP32-C3, PlatformIO) is the old version — `ControlCenter.flash()` still targets it.
+- **Motion control was rebuilt from measurements** — see `docs/control.md` before touching it:
+  loop delay ~0.2 s (Smith predictor, `robofield/control/predictor.py`); the firmware already
+  compensates the dead zone, so the laptop's is 0; measured `speed_curve` and `trim_left 0.923`
+  in `config/field.yaml`; lines/curves use pure pursuit; final turns are single-wheel pivot
+  pulses with waits (`TurnTo`), not a continuous PID. The PID-based plan described further down
+  was tried and replaced.
+- **This car's wheels are wired swapped** relative to the software (`robots[0].wheels_swapped`),
+  handled in `RealBackend._send`. `DiffDrive.inverse()`'s sign fix is correct — never revert it.
+- **Tuning:** `http://localhost:8000/tuning`, saved to `config/tuning.yaml`. Score changes with
+  `tools/eval_motion.py`; re-measure with `tools/measure_latency.py`, `tools/calibrate_motors.py`.
+- Real-car results: straight 350 mm stops 6–7 mm from goal; 120° turn ends within 2–5° in ~4 s.
+- **Next:** lower the firmware dead-zone floors (`LEFT/RIGHT_DEADZONE`) for finer low-speed control
+  and re-run `calibrate_motors.py --write`; build a second car; retrain the race RL policy (the
+  saved one was trained on the old, linear motor model and does not transfer).
+- On Windows, call the local server as `127.0.0.1`, not `localhost` (IPv6-first adds ~2 s per request).
+
 Read this fully before making changes. It reflects the REAL current state as of 2026-11-05, including several deviations from the original design that happened during hardware bring-up. Put this file at the repo root as `CLAUDE.md`.
 What this project is
 An open-source, low-cost multi-robot research platform:
