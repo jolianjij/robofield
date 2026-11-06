@@ -11,6 +11,11 @@ POST /api/car               {"id", "name"?, "color"?, "leds"?, "max_speed"?, "gr
 POST /api/identify          {"id"}
 POST /api/settings          {"speed_limit"?, "geofence_margin_mm"?, "avoid_collisions"?, ...}
 POST /api/flash             {"id", "method": "ota" | "usb"}
+GET  /tuning                the live tuning page
+GET  /api/tuning            current parameter values + the schema that describes them
+POST /api/tuning            {param: value, ...}  - applies immediately, next goal/path onward
+POST /api/tuning/save       persist the current values into config/field.yaml
+POST /api/tuning/reset      back to the built-in defaults (not saved until /api/tuning/save)
 """
 from __future__ import annotations
 
@@ -43,8 +48,17 @@ def make_handler(cc):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif self.path in ("/tuning", "/tuning.html"):
+                body = (STATIC / "tuning.html").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif self.path.startswith("/api/state"):
                 self._json(cc.snapshot())
+            elif self.path.startswith("/api/tuning"):
+                self._json(cc.get_tuning())
             else:
                 self._json({"error": "not found"}, 404)
 
@@ -78,6 +92,12 @@ def make_handler(cc):
                     cc.update_settings(**d)
                 elif p == "/api/flash":
                     ok, msg = cc.flash(int(d["id"]), d.get("method", "ota"))
+                elif p == "/api/tuning":
+                    ok, msg = cc.set_tuning(**d)
+                elif p == "/api/tuning/save":
+                    ok, msg = cc.save_tuning()
+                elif p == "/api/tuning/reset":
+                    ok, msg = cc.reset_tuning()
                 else:
                     return self._json({"error": "not found"}, 404)
             except (KeyError, TypeError, ValueError) as e:

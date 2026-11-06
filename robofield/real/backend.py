@@ -23,6 +23,11 @@ class RealBackend(Backend):
         self.latency = cfg["control"]["latency_s"] if predict_latency else 0.0
         self.offset = cfg["markers"]["robot_id_offset"]
         self.robot_ids = robot_ids
+        # per-robot: this specific car's physical left/right wheels may be wired swapped
+        # relative to what DiffDrive/the simulator call "left" and "right" (see config/field.yaml
+        # robots[].wheels_swapped) - swapped at the radio boundary only, in _send() below, so the
+        # kinematics model stays correct and sim-matching for every other robot and for sim-to-real RL.
+        self._wheels_swapped = {r["id"]: bool(r.get("wheels_swapped", False)) for r in cfg.get("robots", [])}
         self.poses = PoseReceiver(pose_port) if pose_port else PoseReceiver()
         self.cars = CarLink()
         self.ekf: dict[int, RobotEKF] = {}
@@ -54,6 +59,8 @@ class RealBackend(Backend):
         for rid, c in self._cmd.items():
             k = self._battery_gain(rid)
             left, right = max(-1, min(1, c.left * k)), max(-1, min(1, c.right * k))
+            if self._wheels_swapped.get(rid, False):
+                left, right = right, left
             self.cars.send(Command(rid, left=int(left * 1000), right=int(right * 1000),
                                    servo=int(c.gripper * 180), leds=list(c.leds)))
 

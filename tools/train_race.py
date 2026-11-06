@@ -7,20 +7,26 @@ randomization is on by default so the policy does not overfit to one exact motor
     python tools/train_race.py                                  # train from scratch
     python tools/train_race.py --timesteps 2000000 --envs 8      # longer run, more parallel envs
     python tools/train_race.py --eval models/race_ppo.zip         # watch a trained policy run
-    python tools/train_race.py --eval models/race_ppo.zip --real --robot 0   # on the real car
+    python tools/train_race.py --eval models/race_ppo.zip --real --robot 0 --speed-limit 0.4
+                                                                    # on the real car, capped speed
 
 Needs the `train` extra: pip install -e ".[train]" (stable-baselines3 + torch).
 """
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from robofield.control import compensate_deadzone, deadzones_from_config  # noqa: E402
 from robofield.core.state import RobotCommand  # noqa: E402
 from robofield.envs.gym_env import RoboFieldEnv  # noqa: E402
+from robofield.games import make_game  # noqa: E402
 
 
 def make_env(randomize: bool, seed: int):
@@ -48,19 +54,11 @@ def train(args):
     env.close()
 
 
-def evaluate(args):
+def evaluate_sim(args):
     from stable_baselines3 import PPO
 
     model = PPO.load(args.eval)
-    if args.real:
-        from robofield.real import RealBackend
-        from robofield.core import load_config
-        cfg = load_config(args.config)
-        backend = RealBackend(cfg, robot_ids=[args.robot])
-    else:
-        backend = None
-    env = RoboFieldEnv(game="race", randomize=False, backend=backend,
-                        render_mode="rgb_array" if args.render else None)
+    env = RoboFieldEnv(game="race", randomize=False, render_mode="rgb_array" if args.render else None)
     wins, laps_total = 0, 0
     for ep in range(args.episodes):
         obs, info = env.reset()
@@ -73,10 +71,134 @@ def evaluate(args):
         print(f"episode {ep}: laps={info.get('laps')} off_track={info.get('off_track')} "
               f"progress_m={info.get('progress_m', 0):.2f}")
     print(f"{wins}/{args.episodes} completed 3 laps, avg laps {laps_total / args.episodes:.2f}")
-    if backend is not None:
-        backend.apply({args.robot: RobotCommand()})
-        backend.stop(); backend.close()
     env.close()
+
+
+def evaluate_real(args):
+    """Run the trained policy on the real car, through the Safety layer (geofence, speed cap,
+    tracking-loss handling) - unlike the simulator, a wrong or divergent action here can run the
+    car into a wall or off the field for real, and this is the first time this policy has ever
+    seen the real plant. `--speed-limit` scales the policy's own output on top of Safety's cap,
+    so a first run can be deliberately slow before trusting it at race pace."""
+    from stable_baselines3 import PPO
+    from robofield.app.safety import Safety, SafetySettings
+    from robofield.control import DiffDrive, PoseController, deadzones_from_config, safety_margin_mm
+    from robofield.core import load_config
+    from robofield.real import RealBackend
+
+    cfg = load_config(args.config)
+    model = PPO.load(args.eval)
+    game = make_game("race", field_mm=cfg["field"]["width_mm"], margin_mm=safety_margin_mm(cfg))
+    game.seed(0)
+    backend = RealBackend(cfg, robot_ids=[args.robot])
+    dd = DiffDrive.from_config(cfg)
+    safety = Safety(dd, cfg["field"]["width_mm"], deadzones_from_config(cfg),
+                    SafetySettings(speed_limit=args.speed_limit))
+    print(f"speed_limit={args.speed_limit} (fraction of top speed) - raise once this looks right")
+    try:
+        ws = backend.reset()
+        r = ws.robots.get(args.robot)
+        if r is None or not r.visible:
+            print("robot not visible, aborting without sending any command"); return
+
+        # The simulator always starts an episode with the robot already exactly ON the centerline,
+        # facing along the track (it can teleport into that pose); the real backend cannot
+        # teleport, and hand-placing a robot within a 124mm-wide corridor by eye is unreliable in
+        # practice (confirmed - repeated attempts landed just outside it). The policy was never
+        # trained on a position/heading this far from what it expects, and its behavior there is
+        # undefined, not just "worse" (one run froze at near-zero net motion for 39s straight).
+        # So instead of relying on manual placement, drive to the exact nearest centerline point
+        # with the already-confirmed-working PoseController before the policy ever sees an
+        # observation - wherever the robot starts, as long as it is roughly near the ring.
+        s_now, _, track_heading = game._project(r.x, r.y)
+        gx, gy, _ = game._pose_at(s_now)
+        print(f"driving to the exact centerline ({gx:.0f},{gy:.0f}) heading {math.degrees(track_heading):.0f} deg "
+              f"before starting the policy...")
+        pc = PoseController(dd, deadzone=deadzones_from_config(cfg), margin=safety_margin_mm(cfg))
+        pc.set_goal(gx, gy, track_heading, (r.x, r.y))
+        t_align = time.monotonic()
+        while time.monotonic() - t_align < 20 and not pc.done:
+            ws = backend.step()
+            r = ws.robots.get(args.robot)
+            if r is None or not r.visible:
+                backend.apply({args.robot: RobotCommand()}); continue
+            cmd = pc.command(r.x, r.y, r.theta, r.omega, 1 / backend.control_hz)
+            if args.car_speed_scale != 1.0:   # same uniform scale as the main loop below
+                cmd = RobotCommand(cmd.left * args.car_speed_scale, cmd.right * args.car_speed_scale,
+                                   cmd.gripper, cmd.leds)
+            backend.apply({args.robot: cmd})
+        backend.apply({args.robot: RobotCommand()})
+        ws = backend.step()
+        r = ws.robots.get(args.robot)
+        if r is None or not r.visible:
+            print("robot not visible after aligning, aborting"); return
+        s_now, lateral, _ = game._project(r.x, r.y)
+        print(f"aligned (heading {math.degrees(r.theta):.0f} deg vs target {math.degrees(track_heading):.0f} deg) "
+              f"- position ({r.x:.0f},{r.y:.0f}), {abs(lateral):.0f}mm off centerline "
+              f"(track corridor is +-{game.half_width:.0f}mm)")
+        if not args.ignore_off_track and abs(lateral) > game.half_width * 1.5:
+            print("robot is outside the track corridor - move it closer to the centerline and retry")
+            return
+        print("starting the policy")
+
+        game._raw_s_prev, _, _ = game._project(r.x, r.y)
+        game._progress, game._laps, game._off_track = 0.0, 0, False
+        last_action = np.zeros(2, dtype=np.float32)
+        t0 = time.monotonic()
+        last_print = 0.0
+        while time.monotonic() - t0 < args.max_seconds:
+            ws = backend.step()
+            r = ws.robots.get(args.robot)
+            if r is None or not r.visible:
+                backend.apply({args.robot: RobotCommand()}); continue
+            obs = np.concatenate([game.observe(ws, args.robot), last_action]).astype(np.float32)
+            action, _ = model.predict(obs, deterministic=True)
+            action = np.clip(action, -1, 1)
+            last_action = action
+            left, right = float(action[0]), float(action[1])
+            if args.no_reverse:
+                # cheap guard for a forward-only race: the policy was observed to reverse on the
+                # real car in a way it was never actually trained to do (sim's reward only makes
+                # backward progress mildly negative, not disallowed) - zero out any net-backward
+                # body speed while leaving its steering (the v/w split) otherwise untouched.
+                v, w = dd.forward(left, right)
+                left, right = dd.inverse(max(0.0, v), w)
+            cmd = {args.robot: RobotCommand(left, right)}
+            safe_cmd = safety.filter(ws, cmd, tracker_ok=True, now=time.monotonic())
+            if args.car_speed_scale != 1.0:
+                # a uniform scale of both wheels, same as CarProfile.max_speed in the web GUI
+                # (ControlCenter.step_once): unlike Safety's speed_limit, which clips v and w
+                # separately and can distort the intended turning curvature, this keeps the
+                # exact ratio between the two wheels - just slower. Confirmed on the real car
+                # that go-to-pose only stayed on track with this ALSO applied, on top of Safety.
+                #
+                # Lift back above the dead zone afterward (same as every controller in goto.py
+                # does internally): PoseController's own commands tend to already sit near full
+                # scale, so a 10% cut still clears the dead zone, but the policy's raw actions
+                # are more varied and a flat 10% cut can attenuate plenty of them below the
+                # ~8% minimum duty that actually moves a wheel - confirmed on the real car as
+                # the robot freezing at ~zero net motion for 40+ seconds despite a clean start.
+                c = safe_cmd[args.robot]
+                scaled = RobotCommand(c.left * args.car_speed_scale, c.right * args.car_speed_scale,
+                                       c.gripper, c.leds)
+                safe_cmd = {args.robot: compensate_deadzone(scaled, deadzones_from_config(cfg))}
+            backend.apply(safe_cmd)
+            game.reward(ws, ws, safe_cmd)  # Race.reward only reads `ws`; called for its lap/progress side effects
+            if time.monotonic() - last_print > 1.0:
+                print(f"  t={time.monotonic()-t0:4.1f}s laps={game._laps} off_track={game._off_track} "
+                      f"progress_m={game._progress/1000:.2f} safety={safety.events.get(args.robot, '')}")
+                last_print = time.monotonic()
+            # --ignore-off-track: keep running regardless of the race's own track-boundary
+            # definition (lap-count success still ends the run) - Safety (geofence, speed cap,
+            # tracking-loss handling) above is unaffected and still protects the real hardware.
+            if game._laps >= game.laps_to_win or (not args.ignore_off_track and game.done(ws)):
+                break
+        print(f"finished: laps={game._laps} off_track={game._off_track} "
+              f"progress_m={game._progress/1000:.2f} elapsed={time.monotonic()-t0:.1f}s")
+    finally:
+        backend.apply({args.robot: RobotCommand()})
+        backend.stop()
+        backend.close()
 
 
 def main():
@@ -91,14 +213,24 @@ def main():
     ap.add_argument("--out", default="models/race_ppo.zip")
     ap.add_argument("--tensorboard", action="store_true")
     ap.add_argument("--eval", default=None, help="path to a saved model: watch/evaluate instead of training")
-    ap.add_argument("--episodes", type=int, default=5, help="evaluation episodes")
+    ap.add_argument("--episodes", type=int, default=5, help="evaluation episodes (sim only)")
     ap.add_argument("--render", action="store_true")
     ap.add_argument("--real", action="store_true", help="evaluate on the real field instead of the simulator")
     ap.add_argument("--robot", type=int, default=0)
     ap.add_argument("--config", default="config/field.yaml")
+    ap.add_argument("--speed-limit", type=float, default=0.4,
+                    help="real only: fraction of top speed, on top of the policy's own output (default 0.4, cautious)")
+    ap.add_argument("--max-seconds", type=float, default=120.0, help="real only: hard time limit")
+    ap.add_argument("--no-reverse", action="store_true",
+                    help="real only: clamp out any net-backward body speed (see evaluate_real docstring)")
+    ap.add_argument("--car-speed-scale", type=float, default=1.0,
+                    help="real only: uniform scale of both wheels on top of Safety (matches the web "
+                         "GUI's per-car speed slider, cars.json CarProfile.max_speed)")
+    ap.add_argument("--ignore-off-track", action="store_true",
+                    help="real only: do not end the run just for leaving the race ring (Safety stays on)")
     args = ap.parse_args()
     if args.eval:
-        evaluate(args)
+        evaluate_real(args) if args.real else evaluate_sim(args)
     else:
         train(args)
 

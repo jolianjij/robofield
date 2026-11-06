@@ -33,9 +33,16 @@ class GoToPoint:
     the real camera's latency and noise, not a replacement for fixing the sign bug."""
     dd: DiffDrive
     k_rho: float = 2.5          # 1/s, forward gain
-    k_alpha: float = 6.0        # 1/s, heading gain (PID kp)
-    kd_alpha: float = 0.4       # damping on the measured turn rate (PID kd)
-    w_cap_frac: float = 1.0     # heading-rate command capped to this fraction of dd.max_omega (1 = no cap)
+    k_alpha: float = 3.5        # 1/s, heading gain (PID kp)
+    kd_alpha: float = 1.0       # damping on the measured turn rate (PID kd)
+    w_cap_frac: float = 0.45    # heading-rate command capped to this fraction of dd.max_omega:
+                                 # confirmed on the real car (2026-11-05) that the sim-tuned gains
+                                 # above were too aggressive for its real inertia/friction/latency -
+                                 # violent, physically damaging oscillation on ALIGN, not just a slow
+                                 # settle. Lower kp, higher kd, and a real speed cap all reduce how
+                                 # much kinetic energy any remaining overshoot can carry. Re-sweep on
+                                 # the actual car (not just in sim) before trusting any gain change -
+                                 # that is what caught this in the first place.
     v_max: float = 250.0        # mm/s
     tolerance: float = 10.0     # mm
     slow_radius: float = 80.0   # mm, ramp the speed down inside this radius
@@ -51,6 +58,11 @@ class GoToPoint:
 
     def command(self, x: float, y: float, th: float, gx: float, gy: float,
                 omega: float = 0.0, dt: float = 1 / 30) -> tuple[RobotCommand, bool]:
+        # clamp to what the robot can physically do: a bad camera detection or an EKF re-lock can
+        # report a momentary omega far beyond max_omega, and the PID's derivative term would react
+        # to that spike as if it were real (confirmed on the real car - occasional implausible
+        # omega readings during ALIGN made the settle noisier than in sim, though it still converged)
+        omega = max(-self.dd.max_omega, min(self.dd.max_omega, omega))
         dx, dy = gx - x, gy - y
         rho = math.hypot(dx, dy)
         if rho < self.tolerance:
@@ -97,10 +109,17 @@ class TurnTo:
     without the speed gate it just sails through the target repeatedly instead of stopping. The
     PID keeps braking (using its real kd authority) until the spin has actually died down."""
     dd: DiffDrive
-    k: float = 5.0              # 1/s, PID kp
-    kd: float = 0.4             # damping on the measured turn rate
-    w_cap_frac: float = 1.0     # commanded turn rate capped to this fraction of dd.max_omega (1 = no cap)
-    tolerance: float = 0.03     # rad
+    k: float = 3.5              # 1/s, PID kp
+    kd: float = 1.0             # damping on the measured turn rate
+    w_cap_frac: float = 0.45    # commanded turn rate capped to this fraction of dd.max_omega - see
+                                 # GoToPoint's docstring: confirmed on the real car that the
+                                 # sim-tuned, uncapped gains caused violent, physically damaging
+                                 # oscillation; this is a safety margin, not just a tuning choice.
+    tolerance: float = math.radians(6.0)   # not tighter: real camera/marker heading noise is
+                                            # itself several degrees, so a tighter target just
+                                            # means the controller never stops "seeing" itself
+                                            # as off and keeps re-correcting - confirmed on the
+                                            # real car as persistent oscillation / never settling.
     deadzone: float | tuple[float, float] = 0.0
     creep_angle: float = math.radians(8.0)    # below this AND slow enough, switch to creep-pulse
     creep_omega_max: float = 1.0               # rad/s: creep's weak pulses can't brake anything faster
@@ -130,6 +149,8 @@ class TurnTo:
         return RobotCommand(left / s * self.creep_power, right / s * self.creep_power)
 
     def command(self, th: float, target: float, omega: float = 0.0, dt: float = 1 / 30) -> tuple[RobotCommand, bool]:
+        # see GoToPoint.command: clamp a possibly glitchy sensor reading to what's physically possible
+        omega = max(-self.dd.max_omega, min(self.dd.max_omega, omega))
         e = wrap_angle(target - th)
         if abs(e) < self.tolerance:
             self.reset()

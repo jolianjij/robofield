@@ -16,4 +16,5 @@ def load_config(path: str | Path = "config/field.yaml") -> dict[str, Any]:
         v = [float(c) for c in v]
         corners[int(k)] = tuple(v + [0.0] * (3 - len(v)))
     cfg["markers"]["corners"] = corners
+    cfg["_path"] = str(path)   # so a tool that mutates the live config can write it back to the right file
     return cfg
