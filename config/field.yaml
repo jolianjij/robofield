@@ -46,6 +46,12 @@ robots:
   - id: 0
     name: car-0
     max_speed_mm_s: 330
+    # This car's physical left/right wheels are swapped relative to what the kinematics model
+    # (and the simulator) call "left" and "right": commanding a turn rate produced the opposite
+    # physical rotation, confirmed on the real car 2026-11-05, while straight-line forward/backward
+    # driving was correct. RealBackend swaps the two radio command fields for any robot with this
+    # flag set, so DiffDrive / the controllers / the simulator stay untouched and sim-correct.
+    wheels_swapped: true
 
 # Robot model, shared by the simulator, the controllers and the RL environments.
 # Differential drive: 2 staggered N20 wheels near the middle + 1 front ball caster.

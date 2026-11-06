@@ -15,6 +15,12 @@ from robofield.real import RealBackend  # noqa: E402
 from robofield.sim.backend import SimBackend  # noqa: E402
 
 CFG = load_config("config/field.yaml")
+# This test validates the generic RealBackend/CarLink protocol plumbing against an
+# idealised simulated car, not any one physical unit's wiring. `robots[].wheels_swapped`
+# in config/field.yaml records a real quirk of one specific car (confirmed on hardware,
+# see kinematics.py); the simulated stand-in here does not have that quirk, so this test
+# uses a config copy without it.
+CFG_REAL_TEST = {**CFG, "robots": [{"id": 0, "name": "car-0", "max_speed_mm_s": 330}]}
 
 
 def test_carlink_discovers_and_sets_id():
@@ -36,7 +42,7 @@ def test_real_backend_drives_to_points():
     sim = SimBackend(CFG, 1, seed=1, markers=False)
     sim.reset({"robots": {0: (200, 200, 0.0)}})
     world = FakeWorld(sim, cmd_port=34210, status_port=34211, pose_port=35005).start()
-    backend = RealBackend(CFG, robot_ids=[0], pose_port=35005)
+    backend = RealBackend(CFG_REAL_TEST, robot_ids=[0], pose_port=35005)
     backend.cars.close()
     backend.cars = CarLink(status_port=34211, cmd_port=34210)
     ctl = GoToPoint(DiffDrive.from_config(CFG), deadzone=CFG["robot_model"]["deadzone"], v_max=200)
