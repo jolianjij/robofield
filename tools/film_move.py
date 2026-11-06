@@ -142,7 +142,9 @@ def take(a, base, move: dict, style: str):
     print(f"\n== {move['name']} / {style}")
     r = check_seen(base, rid)
     api(base, "/api/tuning", STYLES["after"])        # park with the good controller (not recorded)
-    if math.dist((r["x"], r["y"]), (x0, y0)) > 30 or abs(wrap(r["theta"] - th0)) > math.radians(6):
+    for attempt in range(3):                          # a park can miss (pivot drift): try again from there
+        if math.dist((r["x"], r["y"]), (x0, y0)) <= 30 and abs(wrap(r["theta"] - th0)) <= math.radians(6):
+            break
         print("  parking at the start ...")
         res = api(base, "/api/moves/start", {"id": rid, "name": move["name"]})
         if not res.get("ok"):
@@ -158,6 +160,7 @@ def take(a, base, move: dict, style: str):
         r = check_seen(base, rid)
         off_mm, off_deg = math.dist((r["x"], r["y"]), (x0, y0)), abs(math.degrees(wrap(r["theta"] - th0)))
         print(f"  parked {off_mm:.0f} mm / {off_deg:.1f} deg from the start")
+    else:
         if off_mm > 45 or off_deg > 12:
             raise SystemExit("could not park at the start - nothing recorded; try again")
 
