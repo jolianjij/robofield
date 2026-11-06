@@ -75,6 +75,8 @@ camera once with `pi/pi_calibrate.py` (see [`pi/README.md`](pi/README.md)).
 | `tools/calibrate_motors.py --write` | measure speed-per-command and trim, write them to the config |
 | `tools/eval_motion.py` | score straight lines, turns and curves on the real field |
 | `tools/demo.py wander\|figure8\|square` | demo drives |
+| `tools/film_move.py hook` / `compare --style both` | film a saved move: camera video + Control Center screen recording + a score |
+| `tools/record_camera.py` / `tools/record_screen.py` | record the Pi camera feed / the Control Center page to MP4 |
 | `tools/real_goto.py` | minimal closed-loop go-to-point test |
 | `tools/train_race.py` | train / evaluate a PPO policy for the 3-lap race |
 

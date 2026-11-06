@@ -2,6 +2,7 @@
 
     python tools/record_camera.py --pi 10.127.58.149                 # until Ctrl+C
     python tools/record_camera.py --pi 10.127.58.149 --seconds 90    # fixed length
+    python tools/record_camera.py --pi 10.127.58.149 --stop-file x   # until the file x appears
 
 Saved to recordings/ (git-ignored). The preview runs at ~10 fps; frames are written at their real
 timing, so the video plays back in real time.
@@ -9,6 +10,7 @@ timing, so the video plays back in real time.
 from __future__ import annotations
 
 import argparse
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -24,6 +26,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=0, help="stop after this long (0 = until Ctrl+C)")
     ap.add_argument("--fps", type=float, default=10.0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--stop-file", default=None, help="stop as soon as this file exists (for scripts)")
     a = ap.parse_args()
     out = Path(a.out or f"recordings/camera_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -32,7 +35,17 @@ def main():
     t0 = time.monotonic()
     try:
         while not a.seconds or time.monotonic() - t0 < a.seconds:
-            buf += stream.read(16384)
+            if a.stop_file and os.path.exists(a.stop_file):
+                break
+            try:
+                buf += stream.read(16384)
+            except (TimeoutError, OSError):                  # the Pi's stream stalled: reconnect, keep the file going
+                try:
+                    stream = urllib.request.urlopen(f"http://{a.pi}:{a.port}/", timeout=5)
+                except OSError:
+                    time.sleep(0.5)
+                buf = b""
+                continue
             start = buf.find(b"\xff\xd8")
             end = buf.find(b"\xff\xd9", start + 2)
             if start < 0 or end < 0:

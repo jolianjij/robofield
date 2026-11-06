@@ -16,6 +16,11 @@ GET  /api/tuning            current parameter values + the schema that describes
 POST /api/tuning            {param: value, ...}  - applies immediately, next goal/path onward
 POST /api/tuning/save       persist the current values into config/field.yaml
 POST /api/tuning/reset      back to the built-in defaults (not saved until /api/tuning/save)
+
+GET  /api/moves             the saved moves (drawn paths kept to replay, config/moves/*.json)
+POST /api/moves/save        {"id", "name"} saves that car's last drawn path; or {"name", "points", "theta"}
+POST /api/moves/start       {"id", "name"}  park the car at the move's start, facing along it
+POST /api/moves/play        {"id", "name"}  drive the move (going to its start first if needed)
 """
 from __future__ import annotations
 
@@ -41,24 +46,27 @@ def make_handler(cc):
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            path = self.path.split("?", 1)[0]               # ignore ?caption=... etc. (read by the page itself)
+            if path in ("/", "/index.html"):
                 body = (STATIC / "index.html").read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            elif self.path in ("/tuning", "/tuning.html"):
+            elif path in ("/tuning", "/tuning.html"):
                 body = (STATIC / "tuning.html").read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
-            elif self.path.startswith("/api/state"):
+            elif path == "/api/state":
                 self._json(cc.snapshot())
-            elif self.path.startswith("/api/tuning"):
+            elif path == "/api/tuning":
                 self._json(cc.get_tuning())
+            elif path == "/api/moves":
+                self._json({"moves": cc.list_moves()})
             else:
                 self._json({"error": "not found"}, 404)
 
@@ -98,6 +106,16 @@ def make_handler(cc):
                     ok, msg = cc.save_tuning()
                 elif p == "/api/tuning/reset":
                     ok, msg = cc.reset_tuning()
+                elif p == "/api/moves/save":
+                    pts = d.get("points")
+                    th = d.get("theta")
+                    ok, msg = cc.save_move(int(d.get("id", 0)), d["name"],
+                                           None if pts is None else [(float(x), float(y)) for x, y in pts],
+                                           None if th is None else float(th))
+                elif p == "/api/moves/start":
+                    ok, msg = cc.move_to_start(int(d["id"]), d["name"])
+                elif p == "/api/moves/play":
+                    ok, msg = cc.play_move(int(d["id"]), d["name"])
                 else:
                     return self._json({"error": "not found"}, 404)
             except (KeyError, TypeError, ValueError) as e:
