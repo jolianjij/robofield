@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboField Lab</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<style>
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #1d2430; --muted: #5d6675; --line: #d7dbe2; --soft: #f5f6f8;
+  --accent: #1f3a93; --ok: #2e7d32; --warn: #c77700; --bad: #c62828; color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a21; --panel: #1f242d; --ink: #e8ebf0; --muted: #9aa3b2; --line: #333a46; --soft: #252b35;
+    --accent: #7f9cf5; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select, input[type=number] { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 4px 6px; }
+.wrap { display: grid; grid-template-columns: 250px 1fr; height: 100%; }
+aside { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; padding: 12px 10px; }
+aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 6px 6px; display: flex; justify-content: space-between; align-items: center; }
+aside h2:first-child { margin-top: 2px; }
+aside h2 button { padding: 1px 8px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.item { padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.item:hover { background: var(--soft); }
+.item.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.item b { font-weight: 600; font-size: 13.5px; display: block; }
+.item span { font-size: 12px; color: var(--muted); display: block; line-height: 1.3; }
+.item.err span { color: var(--bad); }
+.kindhelp { font-size: 12px; color: var(--muted); margin: 0 8px 4px; }
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.bar .title { font-weight: 650; }
+.tag { font-size: 11.5px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.dirty { color: var(--warn); font-size: 12.5px; }
+.spacer { flex: 1; }
+.runbox { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.runbox label { display: flex; gap: 4px; align-items: center; }
+.edwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr auto; }
+#editorHost { min-height: 0; position: relative; }
+.CodeMirror { height: 100%; font-size: 13.5px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+textarea#fallback { width: 100%; height: 100%; border: 0; padding: 10px; font: 13.5px ui-monospace, Consolas, monospace; background: var(--panel); color: var(--ink); resize: none; }
+.cm-errline { background: color-mix(in srgb, var(--bad) 18%, transparent) !important; }
+#ref { width: 360px; overflow: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px; font-size: 13px; display: none; }
+#ref.show { display: block; }
+#ref h3 { font-size: 14px; margin: 0 0 6px; }
+#ref code, #out code { font: 12.5px ui-monospace, Consolas, monospace; background: var(--soft); padding: 1px 4px; border-radius: 4px; }
+#ref pre { background: var(--soft); border-radius: 8px; padding: 8px; font-size: 12px; overflow: auto; }
+#ref table { border-collapse: collapse; width: 100%; } #ref td { padding: 3px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+#out { height: 170px; overflow: auto; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 12px; font-size: 13px; }
+#out .ok { color: var(--ok); } #out .bad { color: var(--bad); } #out .muted { color: var(--muted); }
+#out a { color: var(--bad); cursor: pointer; text-decoration: underline; }
+.empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); text-align: center; padding: 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside id="side" aria-label="Your files"></aside>
+  <main>
+    <div class="bar">
+      <span class="title" id="title">Lab</span><span class="tag" id="kindTag" hidden></span><span class="dirty" id="dirty"></span>
+      <span class="spacer"></span>
+      <button id="save" title="Save (Ctrl+S)">Save</button>
+      <button id="check" title="Load it and run it briefly in a simulator">Check</button>
+      <span class="runbox" id="runbox"></span>
+      <button class="danger" id="del" title="Move this file to custom/.deleted/">Delete</button>
+      <button id="refBtn" aria-pressed="false">Reference</button>
+    </div>
+    <div class="edwrap">
+      <div id="editorHost"><div class="empty" id="welcome">
+        <div><b>Write your own robot behaviour.</b><br><br>A <b>task</b> is something a car learns (then train it on the Training tab).<br>
+        A <b>policy</b> is a program that drives one car. A <b>system</b> drives several cars together.<br><br>
+        Pick a file on the left, or press <b>+ New</b>.</div></div></div>
+      <div id="ref"></div>
+    </div>
+    <div id="out" role="log" aria-live="polite"><span class="muted">Output appears here: checks, runs and errors.</span></div>
+  </main>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+const KINDS = [["task", "Tasks", "What a car should learn (RL)."], ["policy", "Policies", "Programs that drive one car."],
+               ["system", "Systems", "Programs that drive several cars."]];
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+let items = {}, cur = null, saved = "", editor = null, errLine = null, app = null, cars = [];
+
+// ------------------------------------------------------------------ editor (CodeMirror if it loaded, else a plain text box)
+function makeEditor() {
+  const host = $("#editorHost"); host.innerHTML = "";
+  if (window.CodeMirror) {
+    editor = CodeMirror(host, { mode: "python", lineNumbers: true, indentUnit: 4, tabSize: 4, matchBrackets: true,
+      theme: dark ? "material-darker" : "default", extraKeys: { Tab: (cm) => cm.replaceSelection("    "), "Ctrl-S": () => save(), "Cmd-S": () => save() } });
+    editor.on("change", markDirty);
+    return { get: () => editor.getValue(), set: (s) => { editor.setValue(s); editor.clearHistory(); }, focusLine: (n) => {
+      if (errLine != null) editor.removeLineClass(errLine, "background", "cm-errline");
+      errLine = n - 1; editor.addLineClass(errLine, "background", "cm-errline");
+      editor.setCursor({ line: errLine, ch: 0 }); editor.scrollIntoView({ line: errLine, ch: 0 }, 120); editor.focus(); },
+      clearMark: () => { if (errLine != null) editor.removeLineClass(errLine, "background", "cm-errline"); errLine = null; } };
+  }
+  const ta = document.createElement("textarea"); ta.id = "fallback"; ta.spellcheck = false; host.appendChild(ta);
+  ta.addEventListener("input", markDirty);
+  ta.addEventListener("keydown", (e) => { if (e.key === "Tab") { e.preventDefault(); document.execCommand("insertText", false, "    "); }
+                                          if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); } });
+  return { get: () => ta.value, set: (s) => { ta.value = s; }, focusLine: (n) => {
+      const lines = ta.value.split("\n"); const pos = lines.slice(0, n - 1).join("\n").length + (n > 1 ? 1 : 0);
+      ta.focus(); ta.setSelectionRange(pos, pos + (lines[n - 1] || "").length); }, clearMark: () => {} };
+}
+let ed = null;
+function markDirty() { $("#dirty").textContent = ed && ed.get() !== saved ? "● unsaved" : ""; }
+document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); } });
+
+// ------------------------------------------------------------------ file list
+async function loadList() {
+  const res = await api("/api/lab");
+  items = res.items;
+  $("#side").innerHTML = KINDS.map(([k, label, help]) => `
+    <h2>${label} <button data-new="${k}" title="New ${k} from a template">+ New</button></h2>
+    <div class="kindhelp">${help}</div>
+    ${(items[k] || []).map(f => `<div class="item ${cur && cur.kind === k && cur.name === f.name ? "sel" : ""} ${f.error ? "err" : ""}"
+        data-kind="${k}" data-name="${esc(f.name)}" tabindex="0"><b>${esc(f.name)}</b><span>${esc(f.error || f.about || "")}</span></div>`).join("")
+      || '<div class="kindhelp" style="font-style:italic">none yet</div>'}`).join("");
+}
+$("#side").addEventListener("click", async (e) => {
+  const nb = e.target.closest("[data-new]");
+  if (nb) return newFile(nb.dataset.new);
+  const it = e.target.closest(".item");
+  if (it) open(it.dataset.kind, it.dataset.name);
+});
+$("#side").addEventListener("keydown", (e) => { const it = e.target.closest(".item"); if (it && e.key === "Enter") open(it.dataset.kind, it.dataset.name); });
+
+async function newFile(kind) {
+  const name = prompt(`Name for the new ${kind} (letters, digits and _):`, kind === "task" ? "my_task" : kind === "policy" ? "my_policy" : "my_system");
+  if (!name) return;
+  const res = await api("/api/lab/new", { kind, name });
+  if (!res.ok) { say(`<span class="bad">${esc(res.msg)}</span>`); return; }
+  await loadList();
+  await open(kind, res.name);
+  say(`<span class="ok">Created ${esc(res.msg)} from the template.</span> Read it, change it, then <b>Check</b>.`);
+}
+
+async function open(kind, name) {
+  if (ed && cur && ed.get() !== saved && !confirm("Leave without saving your changes?")) return;
+  const res = await api(`/api/lab/${kind}/${encodeURIComponent(name)}`);
+  if (res.error) { say(`<span class="bad">${esc(res.error)}</span>`); return; }
+  cur = { kind, name };
+  if (!ed) ed = makeEditor();
+  ed.set(res.source); saved = res.source; ed.clearMark(); markDirty();
+  $("#title").textContent = name; $("#kindTag").textContent = kind; $("#kindTag").hidden = false;
+  renderRun(); renderRef(); loadList();
+  try { localStorage.setItem("rf_lab_open", JSON.stringify(cur)); } catch (e) { }
+}
+
+// ------------------------------------------------------------------ save / check / run
+function say(html, append = false) { $("#out").innerHTML = (append ? $("#out").innerHTML + "<br>" : "") + html; $("#out").scrollTop = 1e9; }
+async function save() {
+  if (!cur) return false;
+  const res = await api("/api/lab/save", { kind: cur.kind, name: cur.name, source: ed.get() });
+  if (res.ok) { saved = ed.get(); markDirty(); say(`<span class="ok">Saved ${esc(res.msg)}.</span>`); loadList(); }
+  else say(`<span class="bad">${esc(res.msg)}</span>`);
+  return res.ok;
+}
+function showErrors(errors) {
+  return errors.map(e => e.line ? `<a data-line="${e.line}">line ${e.line}</a>: <code>${esc(e.message)}</code>` : `<code>${esc(e.message)}</code>`).join("<br>");
+}
+$("#out").addEventListener("click", (e) => { const a = e.target.closest("[data-line]"); if (a) ed.focusLine(+a.dataset.line); });
+async function check() {
+  if (!cur) return;
+  ed.clearMark();
+  say('<span class="muted">Checking: loading it and running it briefly in a simulator…</span>');
+  const res = await api("/api/lab/check", { kind: cur.kind, name: cur.name, source: ed.get() });
+  const notes = (res.notes || []).map(n => `<span class="muted">· ${esc(n)}</span>`).join("<br>");
+  if (res.ok) say(`<span class="ok">✓ Looks good.</span><br>${notes}`);
+  else { say(`<span class="bad">✗ Problem found.</span><br>${showErrors(res.errors || [])}${notes ? "<br>" + notes : ""}`);
+         const l = (res.errors || []).find(e => e.line); if (l) ed.focusLine(l.line); }
+  return res.ok;
+}
+$("#save").addEventListener("click", save);
+$("#check").addEventListener("click", check);
+$("#del").addEventListener("click", async () => {
+  if (!cur || !confirm(`Delete ${cur.name}? (It is moved to custom/.deleted/, so you can get it back.)`)) return;
+  const res = await api("/api/lab/delete", cur);
+  say(res.ok ? `<span class="muted">${esc(res.msg)}</span>` : `<span class="bad">${esc(res.msg)}</span>`);
+  if (res.ok) { cur = null; saved = ""; ed && ed.set(""); $("#title").textContent = "Lab"; $("#kindTag").hidden = true; $("#runbox").innerHTML = ""; loadList(); }
+});
+
+function renderRun() {
+  const box = $("#runbox");
+  if (!cur) { box.innerHTML = ""; return; }
+  if (cur.kind === "task") {
+    box.innerHTML = `<button class="primary" id="train" title="Save, then open the Training tab with this task chosen">Train it →</button>`;
+    $("#train").onclick = async () => { if (await save() && await check()) parent.postMessage({ type: "rf-train", game: cur.name }, "*"); };
+    return;
+  }
+  const meta = (items[cur.kind] || []).find(f => f.name === cur.name) || {};
+  const need = cur.kind === "system" ? (meta.cars || 2) : 1;
+  const opts = cars.map(c => `<label><input type="checkbox" class="car" value="${c.id}"> ${esc(c.name)}</label>`).join("");
+  box.innerHTML = `<span>${cur.kind === "system" ? `cars (${need})` : "car"}:</span>${cur.kind === "system" ? opts :
+      `<select id="carSel">${cars.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>`}
+    <label>speed <select id="spd"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
+    <button class="primary" id="run" title="Save, then run it on the chosen car${cur.kind === "system" ? "s" : ""}">▶ Run</button>
+    <button id="stopRun" title="Stop it">■ Stop</button>`;
+  if (cur.kind === "system") box.querySelectorAll("input.car").forEach((cb, i) => cb.checked = i < need);
+  $("#run").onclick = run; $("#stopRun").onclick = stopRun;
+}
+function chosenIds() {
+  if (cur.kind === "system") return [...document.querySelectorAll("#runbox input.car:checked")].map(c => +c.value);
+  return [+$("#carSel").value];
+}
+async function run() {
+  if (!(await save())) return;
+  const ids = chosenIds();
+  if (app && app.mode === "real" && !confirm(`Run ${cur.name} on the REAL car${ids.length > 1 ? "s" : ""} ${ids.join(", ")}?\nThe safety layer stays on; Stop here, Stop all or Esc on the Field tab stops it.`)) return;
+  const res = await api("/api/lab/run", { kind: cur.kind, name: cur.name, ids, speed: +$("#spd").value });
+  say(res.ok ? `<span class="ok">▶ ${esc(res.msg)}.</span> <span class="muted">Watch it on the Field, 3D or Camera tab.</span>` : `<span class="bad">${esc(res.msg)}</span>`);
+  if (!res.ok) { const m = /line (\d+)/.exec(res.msg); if (m) ed.focusLine(+m[1]); }
+  watchRun = res.ok ? { name: cur.name, ids } : null;
+}
+async function stopRun() { for (const id of chosenIds()) await api("/api/stop", { id }); }
+
+// ------------------------------------------------------------------ live status of a running program
+let watchRun = null, lastStatus = "";
+async function poll() {
+  try {
+    app = await api("/api/app");
+    const st = await api("/api/state");
+    const ids = st.robots.map(r => `${r.id}:${r.name}`).join(",");
+    if (ids !== cars.map(c => `${c.id}:${c.name}`).join(",")) { cars = st.robots.map(r => ({ id: r.id, name: r.name })); renderRun(); }
+    if (watchRun) {
+      const r = st.robots.find(r => watchRun.ids.includes(r.id) && r.program && r.program.name === watchRun.name);
+      if (r) {
+        const p = r.program;
+        const line = p.running ? `<span class="muted">running · ${p.seconds} s${p.slow_steps ? ` · ${p.slow_steps} slow steps (keep step() quick)` : ""}</span>`
+          : p.result === "error" ? `<span class="bad">✗ stopped by an error: ${esc(p.error)}</span>` : `<span class="ok">■ ${esc(p.result || "ended")} after ${p.seconds} s</span>`;
+        if (line !== lastStatus) {
+          say(line, true); lastStatus = line;
+          if (!p.running) { if (p.result === "error") { const m = /line (\d+)/.exec(p.error); if (m) ed.focusLine(+m[1]); } watchRun = null; }
+        }
+      }
+    }
+  } catch (e) { }
+  setTimeout(poll, 600);
+}
+
+// ------------------------------------------------------------------ reference
+const REF = {
+policy: `<h3>Policy: drives one car</h3>
+<p>Two methods. <code>start(self, car, world)</code> runs once; <code>step(self, car, world)</code> runs 30 times a second and returns how to drive.</p>
+<table><tr><td><code>car.x</code>, <code>car.y</code></td><td>position, mm (0..1000)</td></tr>
+<tr><td><code>car.heading</code></td><td>degrees, 0 = +x, counter-clockwise</td></tr>
+<tr><td><code>car.speed</code>, <code>car.turn_rate</code></td><td>mm/s, degrees/s</td></tr>
+<tr><td><code>world.t</code></td><td>seconds since it started</td></tr>
+<tr><td><code>world.cars</code>, <code>world.others(car)</code>, <code>world.car(id)</code></td><td>every car / the other cars / one car</td></tr>
+<tr><td><code>world.ball</code>, <code>world.things</code></td><td>the ball (or None), all objects</td></tr></table>
+<p><b>Return one of</b></p>
+<table><tr><td><code>self.drive(speed, turn)</code></td><td>mm/s forward, degrees/s to the left</td></tr>
+<tr><td><code>self.go_to(car, x, y, speed=200)</code></td><td>head for a point, slow down, stop there</td></tr>
+<tr><td><code>self.face(car, x, y)</code></td><td>turn on the spot toward a point</td></tr>
+<tr><td><code>self.wheels(left, right)</code></td><td>raw wheel commands, -1..1</td></tr>
+<tr><td><code>self.stop()</code></td><td>stand still</td></tr>
+<tr><td><code>self.finish()</code></td><td>end the program</td></tr></table>
+<p><b>Helpers:</b> <code>self.distance(car, x, y)</code> (mm), <code>self.angle_to(car, x, y)</code> (degrees, + = left), <code>self.arrived(car, x, y, within=25)</code>.</p>
+<p>Keep <code>step()</code> quick: no loops that wait, no <code>sleep</code>. Remember things between steps in <code>self</code>. Every command still passes through the safety layer.</p>`,
+system: `<h3>System: drives several cars together</h3>
+<p>Set <code>cars = 2</code> (how many it needs). <code>start(self, world)</code> runs once; <code>step(self, world)</code> runs 30 times a second and returns <code>{car id: command}</code>. A car left out of the dict stands still.</p>
+<pre>def step(self, world):
+    a, b = world.cars[0], world.cars[1]
+    return {a.id: self.go_to(a, 800, 500),
+            b.id: self.go_to(b, a.x, a.y)}</pre>
+<p><code>world.cars</code> lists the cars it drives first, in the order you chose them. The commands and helpers are the same as for a policy: <code>self.drive</code>, <code>self.go_to</code>, <code>self.face</code>, <code>self.stop</code>, <code>self.finish</code>, <code>self.distance</code>, <code>self.angle_to</code>.</p>`,
+task: `<h3>Task: something a car learns</h3>
+<p>A task is a game for reinforcement learning. After <b>Check</b>, <b>Train it →</b> opens the Training tab with it chosen. Units here are mm and <b>radians</b>, like the built-in games.</p>
+<table><tr><td><code>layout()</code></td><td>where an episode starts: <code>{"robots": {0: (x, y, angle)}, "objects": {}}</code>; pick targets here; use <code>self.rng</code> for randomness</td></tr>
+<tr><td><code>observe(ws, i)</code></td><td>what the car sees: a short list of numbers, relative to the car (<code>self.to_robot_frame(car, x, y)</code>), scaled to about -1..1</td></tr>
+<tr><td><code>reward(prev, ws, cmds)</code></td><td><code>{0: number}</code>: how good the last step was. Reward progress, not only the finish</td></tr>
+<tr><td><code>done(ws)</code></td><td>True when the episode is over (success or failure)</td></tr>
+<tr><td><code>info(ws)</code></td><td><code>{"success": ...}</code>: shown while training</td></tr>
+<tr><td><code>begin(ws)</code></td><td>start from where a real car is (the real field cannot place it)</td></tr>
+<tr><td><code>overlays()</code></td><td>what the 3D view draws: circles, paths</td></tr>
+<tr><td><code>max_steps</code></td><td>episode length limit, at 30 steps per second</td></tr></table>
+<p><code>ws.robots[0]</code> has <code>x, y, theta, v, omega</code>. The guide: docs/reinforcement_learning.md.</p>`,
+};
+function renderRef() { $("#ref").innerHTML = cur ? REF[cur.kind] : REF.policy; }
+$("#refBtn").addEventListener("click", () => { const r = $("#ref"); r.classList.toggle("show"); $("#refBtn").setAttribute("aria-pressed", r.classList.contains("show")); renderRef(); });
+
+(async () => {
+  if (!window.CodeMirror) say('<span class="muted">The code editor could not load from the internet: using a plain text box.</span>');
+  await loadList(); poll();
+  let last = null; try { last = JSON.parse(localStorage.getItem("rf_lab_open")); } catch (e) { }
+  if (last && (items[last.kind] || []).some(f => f.name === last.name)) open(last.kind, last.name);
+})();
+</script>
+</body>
+</html>

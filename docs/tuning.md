@@ -19,6 +19,41 @@ the car is right, in this order:
 Then change **one** parameter at a time, run `eval_motion.py` again, and keep the change only if
 the numbers got better.
 
+## Automatic tuning
+
+Instead of moving sliders one at a time, let the computer search. On the Tuning tab of the
+[app](app.md), or from the command line with `tools/autotune.py`:
+
+```bash
+python tools/autotune.py --sim                         # randomized simulators: about a minute
+python tools/autotune.py --real --trials 12            # the real car, through the running app
+```
+
+Every try drives the same test course, starting at (500, 330) facing +y: a 340 mm straight, a 120°
+turn on the spot, a half circle back to the start, and a final turn. It is scored, lower is better:
+
+```
+score = time weight × seconds + accuracy weight × (stop error / 5 mm + worst distance from the line / 10 mm
+        + final heading error / 1.5°) + 2 per wobble + 30 per maneuver that did not finish
+```
+
+The *faster ↔ more accurate* slider (`--precision`, 0 to 1) shifts the two weights.
+
+- **In the simulator** it uses the cross-entropy method: it tries a batch of settings around its
+  current best guess, moves the guess toward the best quarter, narrows the search, and repeats. Every
+  try runs in 3 randomized simulators (delay, friction, motor mismatch), new ones every round, so it
+  cannot win by luck. At the end the best settings and your current ones are compared on simulators
+  neither has seen; if it is not better there, it keeps yours.
+- **On the real car** each try is one real drive of the course (about 25 s), so it makes a few
+  careful changes at a time and keeps each one only if the score improves. Keep the field clear. When
+  it ends, the car is left on your previous values until you press **Apply**.
+
+It tunes the eleven controller settings (speeds, lookahead, tolerances, the turn nudges). It does
+not touch what should be measured instead: the delay, the trims and the motor curve.
+
+A good order: measure the car first, auto-tune in the simulator, check the result on the real car
+with `tools/eval_motion.py`, then a short real auto-tune to adapt to your floor and battery.
+
 ## Where parameters live
 
 | Place | What | When it applies |

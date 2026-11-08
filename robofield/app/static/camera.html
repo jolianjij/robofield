@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboField Camera</title>
+<style>
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #1d2430; --muted: #5d6675; --line: #d7dbe2;
+  --accent: #1f3a93; --ok: #2e7d32; --warn: #c77700; --bad: #c62828; color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a21; --panel: #1f242d; --ink: #e8ebf0; --muted: #9aa3b2; --line: #333a46;
+    --accent: #7f9cf5; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex; flex-direction: column; }
+button { font: inherit; color: inherit; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.rec { color: var(--bad); border-color: currentColor; font-weight: 600; }
+button.rec.on { background: var(--bad); color: #fff; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.bar h1 { font-size: 15px; margin: 0; font-weight: 650; }
+.pill { padding: 2px 10px; border-radius: 999px; font-size: 12.5px; border: 1px solid var(--line); color: var(--muted); }
+.pill.ok { color: var(--ok); border-color: currentColor; } .pill.bad { color: var(--bad); border-color: currentColor; }
+.spacer { flex: 1; }
+.num { font-variant-numeric: tabular-nums; }
+#msg { color: var(--muted); font-size: 13px; }
+#stage { flex: 1; min-height: 0; position: relative; background: #0c0f14; display: flex; align-items: center; justify-content: center; }
+#feed { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+#empty { position: absolute; color: #c9d1dd; text-align: center; max-width: 420px; padding: 20px; font-size: 14px; }
+#recdot { display: none; position: absolute; top: 14px; right: 16px; color: #fff; background: rgba(198,40,40,.9); padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+#recdot.on { display: block; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>Camera</h1>
+  <span id="source" class="pill">…</span>
+  <span id="fps" class="pill num">– fps</span>
+  <span id="msg" role="status"></span>
+  <span class="spacer"></span>
+  <button id="snap" title="Save this frame as a JPEG in recordings/">Snapshot</button>
+  <button id="rec" class="rec" title="Record the camera to an MP4 in recordings/">● Record</button>
+  <button id="full" title="Fill the screen (Esc to leave)">Full screen</button>
+</div>
+<div id="stage">
+  <img id="feed" alt="Live camera view of the field">
+  <div id="empty" hidden></div>
+  <div id="recdot" class="num">● REC</div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+let mode = null, pi = null, visible = true;
+function connect() { if (visible) $("#feed").src = "/camera.mjpg?" + Date.now(); }
+$("#feed").addEventListener("error", () => setTimeout(connect, 1500));
+// the app shell says when this tab is shown or hidden: no stream (and no rendering) while hidden
+addEventListener("message", (e) => {
+  if (!e.data || e.data.type !== "rf-visible") return;
+  visible = e.data.visible;
+  if (visible) connect(); else $("#feed").removeAttribute("src");
+});
+async function tick() {
+  try {
+    const a = await api("/api/app");
+    if (a.mode !== mode || a.pi !== pi) { mode = a.mode; pi = a.pi; connect(); }
+    const c = a.camera || {};
+    $("#source").textContent = a.mode === "sim" ? "simulated overhead camera" : (a.pi ? `Pi camera · ${a.pi}` : "real field · no Pi");
+    $("#source").className = "pill " + (c.live ? "ok" : (c.error ? "bad" : ""));
+    $("#fps").textContent = (c.live ? c.fps.toFixed(1) : "–") + " fps";
+    const empty = $("#empty");
+    empty.hidden = !!c.live;
+    empty.textContent = c.error || "Waiting for the camera…";
+    const rec = c.recording;
+    $("#rec").classList.toggle("on", !!rec);
+    $("#rec").textContent = rec ? `■ Stop (${Math.floor(rec.seconds / 60)}:${String(Math.floor(rec.seconds % 60)).padStart(2, "0")})` : "● Record";
+    $("#recdot").classList.toggle("on", !!rec);
+  } catch (e) { }
+  setTimeout(tick, 1000);
+}
+$("#snap").addEventListener("click", async () => {
+  const r = await api("/api/camera/snapshot", {});
+  $("#msg").textContent = r.ok ? `Saved ${r.msg}` : r.msg;
+});
+$("#rec").addEventListener("click", async () => {
+  const on = !$("#rec").classList.contains("on");
+  const r = await api("/api/camera/record", { on });
+  $("#msg").textContent = r.ok ? (on ? `Recording to ${r.msg}` : `Saved ${r.msg}`) : r.msg;
+});
+$("#full").addEventListener("click", () => { const s = $("#stage"); (s.requestFullscreen || s.webkitRequestFullscreen).call(s); });
+connect(); tick();
+</script>
+</body>
+</html>

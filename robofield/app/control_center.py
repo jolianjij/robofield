@@ -79,9 +79,10 @@ class ControlCenter:
         self.tuning: dict = self._default_tuning()
         self._load_saved_tuning()
         self._apply_tuning()
-        self.modes: dict[int, str] = {}                 # idle | manual | goal | path | policy
+        self.modes: dict[int, str] = {}                 # idle | manual | goal | path | policy | program
         self.manual: dict[int, tuple] = {}              # rid -> (left, right, time)
         self.policies: dict = {}                        # rid -> PolicyDriver (an RL policy driving that car)
+        self.programs: dict = {}                        # rid -> lab.ProgramRunner (a Lab policy or system)
         self.identify_until: dict[int, float] = {}
         self.trails: dict[int, list] = {}
         self.log: list[str] = []
@@ -460,6 +461,8 @@ class ControlCenter:
             for i in ([rid] if rid is not None else list(set(self.modes) | set(self.robot_ids()))):
                 if self.modes.get(i) == "policy" and i in self.policies:
                     self.policies[i].result = "stopped"
+                if self.modes.get(i) == "program" and i in self.programs:
+                    self.programs[i].result = self.programs[i].result or "stopped"
                 self.modes[i] = "idle"
                 self.manual.pop(i, None)
             self._gen += 1
@@ -512,11 +515,64 @@ class ControlCenter:
                 "fps": msg.get("fps") if msg else 0, "locked": bool(msg and msg.get("locked")),
                 "cam": msg.get("cam") if msg else None, "age_s": round(age, 2) if msg else None}
 
+    def _program_commands(self, ws) -> dict:
+        """Run every active Lab program (policy or system) once; {car id: command}."""
+        out, seen = {}, set()
+        names = {i: p.name for i, p in self.profiles.items()}
+        for rid, run in list(self.programs.items()):
+            if id(run) in seen or self.modes.get(rid) != "program":
+                continue
+            seen.add(id(run))
+            if ws is None or any(i not in ws.robots or not ws.robots[i].visible for i in run.ids):
+                continue                                      # a car is not seen: hold still (safety stops it too)
+            out.update(run.step(ws, names))
+            if run.result:                                    # finished or failed: free its cars
+                for i in run.ids:
+                    if self.modes.get(i) == "program":
+                        self.modes[i] = "idle"
+                self._log(f"{run.kind} {run.name}: " + (run.error if run.result == "error" else run.result)
+                          + f" after {run.steps / 30:.1f} s")
+        return out
+
+    def run_program(self, kind: str, name: str, car_ids: list[int], speed: float = 1.0):
+        """Run a Lab policy (one car) or system (several cars) from custom/, through the safety layer."""
+        from robofield.lab import ProgramRunner
+        ids = [int(i) for i in car_ids]
+        if not ids:
+            return False, "choose a car"
+        if kind == "policy":
+            ids = ids[:1]
+        ws = self.state
+        missing = [i for i in ids if ws is None or i not in ws.robots or not ws.robots[i].visible]
+        if missing:
+            return False, f"car {missing[0]} is not visible"
+        try:
+            run = ProgramRunner(kind, name, ids, self.dd, self.cfg["field"]["width_mm"], speed)
+        except Exception as e:
+            return False, f"cannot start {name}: {type(e).__name__}: {e}"
+        with self.lock:
+            try:
+                run.begin(self.state, {i: p.name for i, p in self.profiles.items()})
+            except Exception as e:
+                from robofield.lab import _where
+                line = _where(e, kind, name)
+                return False, f"start() failed: {type(e).__name__}: {e}" + (f" (line {line})" if line else "")
+            for i in ids:
+                old = self.programs.get(i)
+                if old is not None and old is not run and self.modes.get(i) == "program":
+                    old.result = "replaced"
+                self.programs[i] = run
+                self.modes[i] = "program"
+            self._gen += 1
+            self._log(f"{kind} {run.name} driving car{'s' if len(ids) > 1 else ''} {', '.join(map(str, ids))}")
+        return True, f"running {run.name}"
+
     def step_once(self):
         with self.lock:
             now = time.monotonic()
             ws = self.state
             cmds = {}
+            prog_cmds = self._program_commands(ws) if self.programs else {}
             for rid in self.robot_ids():
                 p = self.profile(rid)
                 mode = self.modes.get(rid, "idle")
@@ -547,9 +603,15 @@ class ControlCenter:
                         self.modes[rid] = "idle"
                         info = ", ".join(f"{k} {v:.2f}" if isinstance(v, float) else f"{k} {v}" for k, v in drv.info.items())
                         self._log(f"robot {rid}: policy {drv.result} after {drv.steps / 30:.1f} s ({info})")
+                elif mode == "program" and rid not in self.programs:
+                    self.modes[rid] = "idle"
+                elif mode == "program":
+                    cmd = prog_cmds.get(rid, RobotCommand())
                 s = max(0.0, min(1.0, p.max_speed))
                 if mode == "policy" and rid in self.policies:
                     s *= self.policies[rid].speed
+                if mode == "program" and rid in self.programs:
+                    s *= self.programs[rid].speed
                 if s < 1.0 and (cmd.left or cmd.right):
                     # scale the body motion, not each wheel's command: on this car's non-linear
                     # motors a per-wheel multiply sends both wheels to the same minimum speed and
@@ -635,6 +697,7 @@ class ControlCenter:
                     "omega": r.omega if r else 0,
                     "policy": ({**self.policies[rid].summary(), "running": mode == "policy"}
                                if rid in self.policies else None),
+                    "program": self.programs[rid].summary(mode == "program") if rid in self.programs else None,
                 })
             m = self.cfg["markers"]
             objects = [{"id": o.id, "kind": o.kind, "x": o.x, "y": o.y, "theta": o.theta, "visible": o.visible}

@@ -320,13 +320,27 @@ async function pollState() {
 $("#liveRuns").addEventListener("click", (e) => { const b = e.target.closest("[data-stop]"); if (b) api("/api/stop", { id: +b.dataset.stop }); });
 $("#speed").addEventListener("input", () => $("#speedVal").textContent = Math.round($("#speed").value * 100) + "%");
 
+async function loadGames(pick) {
+  ({ games } = await api("/api/games"));
+  const cur = pick || $("#game").value;
+  $("#game").innerHTML = games.filter(g => g.trainable).map(g => `<option value="${g.name}">${g.name}${g.custom ? " (yours, from the Lab)" : ""}</option>`).join("") +
+    games.filter(g => !g.trainable).map(g => `<option disabled>${g.name} (${g.cars} cars: coming with self-play)</option>`).join("");
+  $("#game").value = games.some(g => g.name === cur && g.trainable) ? cur
+    : games.some(g => g.name === "race") ? "race" : (games.find(g => g.trainable) || {}).name;
+  $("#game").dispatchEvent(new Event("change"));
+}
+function takeLabRequest() {                        // the Lab's "Train it" button chose a task for us
+  let g = null;
+  try { g = localStorage.getItem("rf_train_game"); localStorage.removeItem("rf_train_game"); } catch (e) { }
+  return g;
+}
+addEventListener("message", async (e) => {
+  if (e.data && e.data.type === "rf-train") { takeLabRequest(); await loadGames(e.data.game); $("#name").focus(); }
+});
+
 (async function init() {
   app = await api("/api/app");
-  ({ games } = await api("/api/games"));
-  $("#game").innerHTML = games.filter(g => g.trainable).map(g => `<option value="${g.name}">${g.name}</option>`).join("") +
-    games.filter(g => !g.trainable).map(g => `<option disabled>${g.name} (${g.cars} cars: coming with self-play)</option>`).join("");
-  $("#game").value = games.some(g => g.name === "race") ? "race" : (games.find(g => g.trainable) || {}).name;
-  $("#game").dispatchEvent(new Event("change"));
+  await loadGames(takeLabRequest());
   $("#envs").value = Math.max(1, Math.min(12, (app.cpus || 4) - 2));
   updateEta();
   await loadModels();

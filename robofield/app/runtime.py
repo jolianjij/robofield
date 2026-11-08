@@ -68,12 +68,16 @@ class AppRuntime:
     def __init__(self, cfg: dict, mode: str = "sim", pi: str | None = None, sim_robots: int = 2, port: int = 8000):
         self.cfg, self.port = cfg, port
         self.jobs = JobManager()
+        from robofield import lab
+        self.lab_errors = lab.register_tasks()             # custom tasks become trainable games
         self.lock = threading.Lock()
         self.mode, self.pi, self.sim_robots = mode, pi, sim_robots
         self.status = "starting"
         self.error = ""
         self.cc: ControlCenter | None = None
         self.cc = self._make(mode, pi, sim_robots)
+        from .camera import CameraHub
+        self.camera = CameraHub(self)
         self.status = "ready"
 
     # ------------------------------------------------------------------ simulator / real field
@@ -83,7 +87,7 @@ class AppRuntime:
             backend = RealBackend(self.cfg)
         else:
             from robofield.sim.backend import SimBackend
-            backend = SimBackend(self.cfg, n_robots=sim_robots, seed=0, randomize=True, markers=False)
+            backend = SimBackend(self.cfg, n_robots=sim_robots, seed=0, randomize=True, markers=True)   # markers: for the camera view
         return ControlCenter(self.cfg, backend, mode, pi_host=pi).start()
 
     def switch(self, mode: str, pi: str | None = None, sim_robots: int | None = None) -> tuple[bool, str]:
@@ -119,15 +123,17 @@ class AppRuntime:
             return not self.error, msg
 
     def info(self) -> dict:
+        cam = self.camera.status() if getattr(self, "camera", None) else None
         return {"mode": self.mode, "pi": self.pi, "sim_robots": self.sim_robots, "status": self.status,
-                "error": self.error, "port": self.port, "cpus": os.cpu_count() or 4}
+                "error": self.error, "port": self.port, "cpus": os.cpu_count() or 4, "camera": cam}
 
     # ------------------------------------------------------------------ policies and games
     @staticmethod
     def games() -> list[dict]:
         from robofield.games import REGISTRY
         return [{"name": n, "cars": c.n_robots, "trainable": c.n_robots == 1,
-                 "about": (c.__doc__ or "").strip().split("\n")[0]} for n, c in sorted(REGISTRY.items())]
+                 "about": (c.__doc__ or "").strip().split("\n")[0], "custom": bool(getattr(c, "custom", False))}
+                for n, c in sorted(REGISTRY.items())]
 
     @staticmethod
     def models() -> list[dict]:
@@ -207,7 +213,33 @@ class AppRuntime:
         job = self.jobs.start("tool", tool["title"], args, meta={"tool": tool_id, "exclusive": tool["exclusive"]})
         return True, str(job.id)
 
+    def start_autotune(self, where: str = "sim", trials: int = 0, precision: float = 0.5, group: str = "all",
+                       robot: int = 0) -> tuple[bool, str]:
+        """Find good controller settings (tools/autotune.py): in randomized simulators, or on the real car
+        through this app (it drives the course over and over)."""
+        if self.jobs.running("autotune"):
+            return False, "an automatic tuning run is already going"
+        if where == "real":
+            if self.mode != "real":
+                return False, "switch the app to the real field first"
+            r = self.cc.state.robots.get(robot) if self.cc.state else None
+            if r is None or not r.visible:
+                return False, f"car {robot} is not seen by the camera"
+        stop = ROOT / "logs" / "autotune.stop"
+        stop.parent.mkdir(exist_ok=True)
+        stop.unlink(missing_ok=True)
+        args = ["tools/autotune.py", "--sim" if where != "real" else "--real", "--url", f"http://127.0.0.1:{self.port}",
+                "--precision", str(float(precision)), "--group", group, "--robot", str(int(robot)),
+                "--stop-file", str(stop), "--start", json.dumps(self.cc.tuning)]
+        if trials:
+            args += ["--trials", str(int(trials))]
+        job = self.jobs.start("autotune", f"Auto-tune ({'real car' if where == 'real' else 'simulator'})", args,
+                              stop_file=stop, meta={"where": where, "robot": robot})
+        return True, str(job.id)
+
     def close(self):
+        if getattr(self, "camera", None):
+            self.camera.close()
         self.jobs.close_all()
         if self.cc:
             self.cc.close()

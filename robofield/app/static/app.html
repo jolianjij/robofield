@@ -62,7 +62,9 @@ main iframe.show { display: block; }
   <nav role="tablist">
     <button role="tab" data-tab="field">Field</button>
     <button role="tab" data-tab="view3d">3D view</button>
+    <button role="tab" data-tab="camera">Camera</button>
     <button role="tab" data-tab="training">Training</button>
+    <button role="tab" data-tab="lab">Lab</button>
     <button role="tab" data-tab="tools">Tools</button>
     <button role="tab" data-tab="tuning">Tuning</button>
   </nav>
@@ -81,7 +83,7 @@ main iframe.show { display: block; }
   <div id="busy"><span id="busyText">Switching…</span></div>
 </main>
 <script>
-const PAGES = { field: "/", view3d: "/view3d", training: "/training", tools: "/tools", tuning: "/tuning" };
+const PAGES = { field: "/", view3d: "/view3d", camera: "/camera", training: "/training", lab: "/lab", tools: "/tools", tuning: "/tuning" };
 const main = document.querySelector("main");
 const frames = {};
 let app = null;
@@ -95,7 +97,14 @@ function show(tab) {
     f.src = PAGES[tab]; f.title = tab;
     main.appendChild(f); frames[tab] = f;
   }
-  for (const [k, f] of Object.entries(frames)) f.classList.toggle("show", k === tab);
+  for (const [k, f] of Object.entries(frames)) {
+    const was = f.classList.contains("show");
+    f.classList.toggle("show", k === tab);
+    if (was !== (k === tab)) {                     // tell the page (the camera stops streaming while hidden)
+      const tell = () => f.contentWindow && f.contentWindow.postMessage({ type: "rf-visible", visible: k === tab }, "*");
+      f.contentDocument && f.contentDocument.readyState === "complete" ? tell() : f.addEventListener("load", tell, { once: true });
+    }
+  }
   document.querySelectorAll("nav button").forEach(b => {
     b.classList.toggle("active", b.dataset.tab === tab); b.setAttribute("aria-selected", b.dataset.tab === tab);
   });
@@ -149,6 +158,15 @@ document.getElementById("modeSim").addEventListener("click", () => switchMode("s
 document.getElementById("modeReal").addEventListener("click", () => switchMode("real"));
 document.getElementById("simCars").addEventListener("change", () => switchMode("sim"));
 document.getElementById("piAddr").addEventListener("keydown", e => { if (e.key === "Enter") switchMode("real"); });
+
+// the Lab asks to train a task: open the Training tab with that game chosen
+addEventListener("message", (e) => {
+  if (!e.data || e.data.type !== "rf-train") return;
+  store("rf_train_game", e.data.game);
+  const ready = !!frames.training;
+  show("training");
+  if (ready) frames.training.contentWindow.postMessage(e.data, "*");
+});
 
 show(store("rf_tab") || "field");
 poll(); setInterval(poll, 2000);

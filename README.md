@@ -26,6 +26,9 @@ can be developed in simulation and then run on the real cars unchanged.
 | **Live tuning** | `/tuning`: every controller and motor parameter on a slider, saved to `config/tuning.yaml` |
 | **3D view** | the simulator or the real field in 3D: cars, LEDs, paths, the camera's view |
 | **RL in the app** | train a policy with a live learning curve, evaluate it, let it drive a simulated or real car |
+| **Automatic tuning** | the app searches for the best controller settings, in randomized simulators or on the real car |
+| **Camera** | the Pi's live view (or the simulator's overhead camera), with snapshots and recording |
+| **Lab** | write your own tasks to train, and policies and systems that drive one or several cars, in Python |
 | **Games / RL** | Gymnasium + PettingZoo environments (go-to, sumo, a 3-lap race), PPO training |
 
 Measured on the real car (2026-11-06, `tools/eval_motion.py`):
@@ -80,7 +83,8 @@ simulated car, then the real field step by step. Everything else is listed in [`
 
 | | |
 |---|---|
-| [The app](docs/app.md) | Every tab of the RoboField app: field, 3D view, training, tools, tuning |
+| [The app](docs/app.md) | Every tab of the RoboField app: field, 3D view, camera, training, Lab, tools, tuning |
+| [Lab](docs/lab.md) | Write your own tasks, policies and systems for the robots |
 | [Architecture](docs/architecture.md) | Every package and module, and one control cycle from camera frame to wheel |
 | [Kinematics](docs/kinematics.md) | The differential-drive model and the measured motor model, with worked numbers |
 | [Motion control](docs/control.md) | Delay prediction, the EKF, pure pursuit, pulse-and-wait turns |
@@ -94,7 +98,8 @@ simulated car, then the real field step by step. Everything else is listed in [`
 | Command | What it does |
 |---|---|
 | `tools/robofield_app.py` | **the RoboField app**: everything below in one window |
-| `tools/train.py --game race` | train / evaluate a PPO policy for any one-car game |
+| `tools/train.py --game race` | train / evaluate a PPO policy for any one-car game, including your own tasks |
+| `tools/autotune.py --sim` | find good controller settings automatically (`--real` on the car) |
 | `tools/cars.py list` / `test 0` | find cars on the network; drive one through a self-test |
 | `tools/measure_latency.py` | measure the command-to-camera delay on the real field |
 | `tools/calibrate_motors.py --write` | measure top wheel speed and left/right trim, write them to the config |
@@ -118,6 +123,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 | `firmware/car_esp8266/` | **the firmware the cars run** (Wemos D1 Mini + DRV8833, Arduino IDE) |
 | `firmware/car/`, `firmware/gateway/` | earlier ESP32-C3 / PlatformIO versions, same protocol |
 | `config/field.yaml` | every measurement: field, towers, camera, robot model, delay |
+| `custom/` | your own tasks, policies and systems, written in the app's Lab tab |
 | `hardware/` | the car's parts and wiring; CAD assemblies of the car and the field |
 | `docs/` | [all the documentation](docs/README.md): getting started, architecture, kinematics, control, tuning, testing |
 | `tests/` | `pytest`: control, vision, protocol, safety, the full real-field stack against a simulated field |

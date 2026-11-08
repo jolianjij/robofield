@@ -54,6 +54,23 @@ select#robotSel { width: 100%; margin-bottom: 10px; }
 .tools .hint { color: var(--muted); font-size: 12.5px; }
 #map { flex: 1; width: 100%; min-height: 300px; border-radius: 10px; touch-action: none; cursor: crosshair; background: var(--bg); }
 
+/* automatic tuning */
+#autotune { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; background: color-mix(in srgb, var(--blue) 4%, transparent); }
+#autotune h2 { margin: 0 0 2px; }
+#autotune .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 8px; }
+.atrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.atrow select { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 4px 6px; }
+.atrow label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+.atbar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 8px 0 4px; }
+.atbar i { display: block; height: 100%; width: 0; background: var(--blue); transition: width .4s; }
+#atChart { width: 100%; height: 80px; display: block; }
+#atMsg { font-size: 13px; margin-top: 4px; }
+#atMsg .good { color: var(--ok); font-weight: 600; }
+#atResult table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+#atResult td, #atResult th { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+#atResult th { color: var(--muted); font-weight: 600; font-size: 12px; }
+button.danger { color: var(--bad); }
+
 @media (max-width: 1000px) {
   main { grid-template-columns: 1fr; height: auto; }
   #map { height: 70vw; }
@@ -71,9 +88,25 @@ select#robotSel { width: 100%; margin-bottom: 10px; }
 
 <main>
   <section class="panel" id="paramsPanel">
+    <div id="autotune" hidden>
+      <h2>Automatic tuning</h2>
+      <p class="hint">The computer drives a test course again and again (a straight, a 120&deg; turn, a half circle back, a final turn)
+        with different settings, and keeps what scores best on time and accuracy.</p>
+      <div class="atrow">
+        <select id="atWhere" aria-label="Where to tune"><option value="sim">In the simulator (fast)</option><option value="real">On the real car</option></select>
+        <select id="atEffort" aria-label="How long"></select>
+        <label>faster <input type="range" id="atPrec" min="0" max="1" step="0.1" value="0.5" aria-label="Speed versus accuracy"> more accurate</label>
+        <button class="primary" id="atStart">Start</button>
+        <button class="danger" id="atStop" hidden>Stop</button>
+      </div>
+      <div class="atbar" id="atBarWrap" hidden><i id="atBar"></i></div>
+      <canvas id="atChart" hidden role="img" aria-label="Score of every try; lower is better"></canvas>
+      <div id="atMsg" role="status"></div>
+      <div id="atResult"></div>
+    </div>
     <div class="toolbar">
       <button id="resetBtn" title="Back to the built-in defaults (not saved)">Reset to defaults</button>
-      <button id="saveBtn" class="primary" title="Write these values into config/field.yaml">Save to config</button>
+      <button id="saveBtn" class="primary" title="Write these values into config/tuning.yaml">Save to config</button>
       <span id="saveMsg" class="num" style="color:var(--muted)"></span>
     </div>
     <div id="groups"></div>
@@ -285,6 +318,91 @@ window.addEventListener("resize", () => { resize(); draw(); });
 pollTuning();
 setInterval(pollTuning, 2000);     // pick up changes another tab/session made
 poll();
+
+// ------------------------------------------------------------------ automatic tuning (only inside the RoboField app)
+(function () {
+  const get = (p) => fetch(p).then((r) => r.ok ? r.json() : null).catch(() => null);
+  const EFFORT = { sim: [["80", "Quick · 80 tries"], ["160", "Standard · 160 tries"], ["400", "Thorough · 400 tries"]],
+                   real: [["8", "Quick · 8 drives (~3 min)"], ["12", "Standard · 12 drives (~5 min)"], ["20", "Long · 20 drives (~8 min)"]] };
+  let job = null, result = null, appInfo = null;
+  function fillEffort() {
+    const w = $("#atWhere").value;
+    $("#atEffort").innerHTML = EFFORT[w].map(([v, l], i) => `<option value="${v}" ${i === 1 ? "selected" : ""}>${l}</option>`).join("");
+  }
+  $("#atWhere").addEventListener("change", fillEffort);
+  function chart(curve) {
+    const cv = $("#atChart"); cv.hidden = !curve.length;
+    if (!curve.length) return;
+    const dpr = Math.min(2, devicePixelRatio || 1), w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    const st = getComputedStyle(document.documentElement);
+    const scores = curve.map((p) => p.score), n = curve[0].trials || curve.length;
+    let lo = Math.min(...scores), hi = Math.max(...scores); if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
+    const X = (i) => 6 + (w - 12) * i / Math.max(1, n - 1), Y = (v) => 6 + (h - 12) * (1 - (v - lo) / (hi - lo));
+    g.fillStyle = st.getPropertyValue("--muted").trim();
+    curve.forEach((p, i) => { g.globalAlpha = 0.35; g.beginPath(); g.arc(X(p.trial), Y(p.score), 2, 0, 7); g.fill(); });
+    g.globalAlpha = 1; g.strokeStyle = st.getPropertyValue("--blue").trim(); g.lineWidth = 2; g.beginPath();
+    curve.forEach((p, i) => { const x = X(p.trial), y = Y(p.best); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  }
+  const LABEL = {};
+  function showResult(r) {
+    result = r;
+    const rows = Object.entries(r.changed || {});
+    const pct = r.check_start ? Math.round(100 * (1 - r.check_best / r.check_start)) : Math.round(100 * (1 - r.best_score / r.start_score));
+    $("#atMsg").innerHTML = r.note ? r.note :
+      `<span class="good">${pct}% better</span> ${r.check_start ? "on simulators it had not seen" : "than the start values"} (score ${r.check_best ?? r.best_score} vs ${r.check_start ?? r.start_score}, lower is better).`;
+    $("#atResult").innerHTML = rows.length ? `<table><tr><th>Setting</th><th>Now</th><th>Found</th></tr>${rows.map(([k, [a, b]]) =>
+        `<tr><td>${LABEL[k] || k}</td><td class="num">${+a.toFixed(3)}</td><td class="num"><b>${+b.toFixed(3)}</b></td></tr>`).join("")}</table>
+        <button class="primary" id="atApply">Apply</button> <button id="atApplySave">Apply and save</button>
+        <span class="hint">Apply uses them from the next goal; save keeps them after a restart.</span>` : "";
+    const apply = async (saveToo) => {
+      await api("/api/tuning", r.best);
+      if (saveToo) await api("/api/tuning/save", {});
+      $("#atMsg").innerHTML += `<br>${saveToo ? "Applied and saved." : "Applied."}`;
+      pollTuning();
+    };
+    if (rows.length) { $("#atApply").onclick = () => apply(false); $("#atApplySave").onclick = () => apply(true); }
+  }
+  async function poll() {
+    const jobs = await get("/api/jobs");
+    if (jobs) {
+      const running = jobs.jobs.find((j) => j.kind === "autotune" && (j.status === "running" || j.status === "stopping"));
+      if (running && (!job || job !== running.id)) { job = running.id; result = null; $("#atResult").innerHTML = ""; }
+      if (job) {
+        const j = await get(`/api/jobs/${job}?since=1000000`);
+        if (j) {
+          const p = j.progress, run = j.status === "running" || j.status === "stopping";
+          $("#atStart").hidden = run; $("#atStop").hidden = !run; $("#atBarWrap").hidden = !run;
+          if (p) $("#atBar").style.width = Math.min(100, 100 * (p.trial + 1) / p.trials) + "%";
+          chart(j.curve || []);
+          if (run) $("#atMsg").textContent = p ? `Try ${p.trial + 1} of ${p.trials} · best score ${p.best} (start ${p.start}) · lower is better`
+                                                : "Starting…";
+          else {
+            job = null;
+            if (j.result) showResult(j.result);
+            else $("#atMsg").textContent = j.status === "failed" ? "It stopped with an error: see the Tools tab output." : "Stopped.";
+          }
+        }
+      }
+    }
+    setTimeout(poll, 1000);
+  }
+  $("#atStart").addEventListener("click", async () => {
+    const where = $("#atWhere").value, trials = +$("#atEffort").value, robot = selected ?? 0;
+    if (where === "real" && !confirm(`Car ${robot} will drive the test course ${trials} times, starting at the middle of the bottom half (500, 330) facing up.\n\nKeep the field clear and stay near the STOP button. Continue?`)) return;
+    const r = await api("/api/jobs/autotune", { where, trials, precision: +$("#atPrec").value, robot });
+    $("#atMsg").textContent = r.ok ? "Starting…" : r.msg;
+  });
+  $("#atStop").addEventListener("click", () => job && api("/api/jobs/stop", { id: job }));
+  get("/api/app").then((a) => {
+    if (!a) return;                                   // the plain Control Center: no automatic tuning here
+    appInfo = a; $("#autotune").hidden = false;
+    if (a.mode === "real") $("#atWhere").value = "real";
+    fillEffort(); poll();
+    get("/api/tuning").then((tt) => tt && tt.schema.forEach((row) => LABEL[row[0]] = row[2]));
+  });
+})();
 </script>
 </body>
 </html>

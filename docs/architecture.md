@@ -119,8 +119,9 @@ How these fit together is in [motion control](control.md).
 | `static/tuning.html` | | The tuning page: every parameter as a slider, a test map, live telemetry |
 | `policy.py` | `PolicyDriver` | A trained RL policy driving one car, inside the Control Center (so through safety). Mode `policy` |
 | `runtime.py` | `AppRuntime`, `TOOLS` | The app: one Control Center switchable between simulator and real field, the trained policies, starting jobs |
-| `jobs.py` | `JobManager` | Training, evaluation and tools as background processes, their output and learning curves |
-| `static/app.html`, `view3d.html`, `training.html`, `tools.html` | | The app's shell with its tabs, the three.js 3D view, the Training and Tools tabs |
+| `jobs.py` | `JobManager` | Training, evaluation, auto-tuning and tools as background processes, their output and curves |
+| `camera.py` | `CameraHub` | The Camera tab's feed: the Pi's stream relayed, or the simulator's overhead camera rendered; snapshots, recording |
+| `static/app.html`, `view3d.html`, `camera.html`, `training.html`, `lab.html`, `tools.html` | | The app's shell with its tabs, and one page per tab |
 
 Everything that wants to move a car (the web page, `tools/demo.py`, `tools/film_move.py`,
 `tools/eval_motion.py`, a future game or RL policy) goes through `ControlCenter`, so it all gets the
@@ -208,6 +209,7 @@ Wiring, flashing and the known trade-offs: [`firmware/car_esp8266/README.md`](..
 | `robofield_app.py` | **The RoboField app** ([app](app.md)): every page below in one window, simulator or real field |
 | `control_center.py` | Just the Control Center (simulator by default, `--real --pi <ip>` for the field) |
 | `train.py` | Train or evaluate a PPO policy for any one-car game; the app's Training tab runs it |
+| `autotune.py` | Search for good controller settings on a test course, in simulators or on the car |
 | `cars.py` | List cars on the network, set a car's id, run a self-test, drive with the keyboard |
 | `measure_latency.py` | Measure the command-to-camera delay of your setup |
 | `calibrate_motors.py` | Measure the top wheel speed and the left/right trim, optionally write them to the config |
@@ -332,6 +334,9 @@ cc = ControlCenter(cfg, SimBackend(cfg, n_robots=2), "sim").start()
 cc.set_goal(0, 700, 300, 0.0)
 cc.update_car(1, leds=[[255, 0, 0]] * 3)
 ```
+
+**Write a task, a policy or a system without touching the code:** the app's Lab tab and `robofield/lab.py`
+load them from `custom/` ([Lab](lab.md)). Programs run in the Control Center's `program` mode.
 
 **Add a game:** subclass `Game` in `robofield/games/`, decorate it with `@register("mygame")`,
 implement `layout`, `observe`, `reward` and `done`, and set `obs_dim`. It is then available to

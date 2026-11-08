@@ -9,6 +9,8 @@ GET  /tuning                the live tuning page
 GET  /view3d                the 3D view of the field (simulator or real)
 GET  /app                   [app] the app shell with all the tabs
 GET  /training, /tools      [app] the Training and Tools tabs
+GET  /camera, /lab          [app] the Camera and Lab tabs
+GET  /camera.mjpg           [app] the live camera: the Pi's view, or the simulator's overhead camera
 
 Control Center
 GET  /api/state             everything the pages show (robots, objects, tracker, safety, log)
@@ -46,6 +48,16 @@ POST /api/jobs/train        {"game", "timesteps", "envs", "name"?, "randomize"?,
 POST /api/jobs/eval         {"model", "episodes"?, "randomize"?}
 POST /api/jobs/tool         {"tool", "robot"?, "seconds"?, "write"?}
 POST /api/jobs/stop         {"id"}
+POST /api/jobs/autotune     {"where": "sim" | "real", "trials"?, "precision"?, "group"?, "robot"?}
+POST /api/camera/snapshot   save the current camera frame to recordings/
+POST /api/camera/record     {"on": true | false}   record the camera to recordings/*.mp4
+GET  /api/lab               the custom tasks, policies and systems (custom/)
+GET  /api/lab/<kind>/<name> one file's source
+POST /api/lab/new           {"kind", "name"}               a new file from the template
+POST /api/lab/save          {"kind", "name", "source"}
+POST /api/lab/check         {"kind", "name", "source"}     load it and run it briefly in a simulator
+POST /api/lab/delete        {"kind", "name"}               (moved to custom/.deleted/)
+POST /api/lab/run           {"kind", "name", "ids": [..], "speed"?}   a policy or system drives cars
 """
 from __future__ import annotations
 
@@ -56,8 +68,9 @@ from urllib.parse import parse_qs, urlparse
 
 STATIC = Path(__file__).resolve().parent / "static"
 PAGES = {"/": "index.html", "/index.html": "index.html", "/tuning": "tuning.html", "/tuning.html": "tuning.html",
-         "/view3d": "view3d.html", "/app": "app.html", "/training": "training.html", "/tools": "tools.html"}
-APP_PAGES = {"/app", "/training", "/tools"}
+         "/view3d": "view3d.html", "/app": "app.html", "/training": "training.html", "/tools": "tools.html",
+         "/camera": "camera.html", "/lab": "lab.html"}
+APP_PAGES = {"/app", "/training", "/tools", "/camera", "/lab"}
 
 
 def make_handler(target):
@@ -92,6 +105,15 @@ def make_handler(target):
         def do_GET(self):
             url = urlparse(self.path)
             path, q = url.path, parse_qs(url.query)        # ?caption=... etc. is read by the page itself
+            if path == "/camera.mjpg" and rt is not None:
+                return self._mjpeg()
+            if path == "/robofield.ico":
+                body = (STATIC / "robofield.ico").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/x-icon")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                return self.wfile.write(body)
             if path in PAGES:
                 if path in APP_PAGES and rt is None:
                     return self._json({"error": "this page is part of the RoboField app (tools/robofield_app.py)"}, 404)
@@ -118,6 +140,17 @@ def make_handler(target):
                     return self._json({"tools": TOOLS})
                 if path == "/api/jobs":
                     return self._json({"jobs": rt.jobs.list()})
+                if path == "/api/lab":
+                    from robofield import lab
+                    return self._json({"items": lab.list_all(), "errors": rt.lab_errors})
+                if path.startswith("/api/lab/"):
+                    from robofield import lab
+                    try:
+                        _, _, _, kind, name = path.split("/")
+                        return self._json({"kind": kind, "name": name,
+                                           "source": lab.path_of(kind, name).read_text(encoding="utf-8")})
+                    except (ValueError, OSError) as e:
+                        return self._json({"error": str(e)}, 404)
                 if path.startswith("/api/jobs/"):
                     try:
                         job = rt.jobs.get(int(path.rsplit("/", 1)[1]), int(q.get("since", ["0"])[0]))
@@ -125,6 +158,24 @@ def make_handler(target):
                         job = None
                     return self._json(job) if job else self._json({"error": "no such job"}, 404)
             self._json({"error": "not found"}, 404)
+
+        def _mjpeg(self):
+            """The live camera, as a stream of JPEGs (an <img> can show it)."""
+            hub = rt.camera
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            seq = -1
+            try:
+                while True:
+                    seq, jpeg = hub.wait_frame(seq, 2.0)
+                    if jpeg is None:
+                        continue
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                     + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                pass
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length", 0))
@@ -190,11 +241,48 @@ def make_handler(target):
                                             bool(d.get("write", False)))
                 elif rt is not None and p == "/api/jobs/stop":
                     ok, msg = rt.jobs.stop(int(d["id"]))
+                elif rt is not None and p == "/api/jobs/autotune":
+                    ok, msg = rt.start_autotune(d.get("where", "sim"), int(d.get("trials", 0)), float(d.get("precision", 0.5)),
+                                                d.get("group", "all"), int(d.get("robot", 0)))
+                elif rt is not None and p == "/api/camera/snapshot":
+                    ok, msg = rt.camera.snapshot()
+                elif rt is not None and p == "/api/camera/record":
+                    ok, msg = rt.camera.start_recording() if d.get("on", True) else rt.camera.stop_recording()
+                elif rt is not None and p.startswith("/api/lab/"):
+                    ok, msg, extra = self._lab(p[len("/api/lab/"):], d)
+                    if extra is not None:
+                        return self._json({"ok": ok, "msg": msg, **extra})
                 else:
                     return self._json({"error": "not found"}, 404)
             except (KeyError, TypeError, ValueError) as e:
                 return self._json({"ok": False, "msg": f"bad request: {e}"}, 400)
             self._json({"ok": ok, "msg": msg})
+
+        def _lab(self, action, d):
+            from robofield import lab
+            kind, name = d.get("kind", ""), d.get("name", "")
+            if action == "new":
+                p = lab.path_of(kind, name)
+                if p.exists():
+                    return False, f"{p.name} already exists", None
+                src = lab.template(kind, name)
+                ok, msg = lab.save(kind, name, src)
+                return ok, msg, {"name": p.stem, "source": src}
+            if action == "save":
+                ok, msg = lab.save(kind, name, d["source"])
+                if kind == "task":
+                    rt.lab_errors = lab.register_tasks()
+                return ok, msg, {"name": lab.path_of(kind, name).stem}
+            if action == "check":
+                res = lab.check_isolated(kind, name, d["source"])
+                return res["ok"], "looks good" if res["ok"] else "problem found", res
+            if action == "delete":
+                ok, msg = lab.delete(kind, name)
+                return ok, msg, None
+            if action == "run":
+                ok, msg = cc().run_program(kind, name, d.get("ids", [0]), float(d.get("speed", 1.0)))
+                return ok, msg, None
+            return False, "unknown Lab action", None
 
     return Handler
 

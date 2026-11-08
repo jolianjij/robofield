@@ -37,6 +37,8 @@ MODELS = ROOT / "models"
 
 
 def single_car_games() -> list[str]:
+    from robofield.lab import register_tasks
+    register_tasks()                                      # your own tasks from custom/tasks/ too
     return sorted(name for name, cls in REGISTRY.items() if cls.n_robots == 1)
 
 
@@ -65,6 +67,8 @@ def make_env(game: str, randomize: bool, seed: int):
                 info.setdefault("success", False)
                 return obs, r, term, trunc, info
 
+        from robofield.lab import register_tasks
+        register_tasks()                                  # this process may train a custom task (custom/tasks/)
         # predict=True: observe the delay-predicted state, exactly as the real field reports it
         return SuccessInfo(RoboFieldEnv(game=game, randomize=randomize, seed=seed, predict=True))
     return _make
