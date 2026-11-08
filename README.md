@@ -45,8 +45,8 @@ Full write-up with the data: [`docs/control.md`](docs/control.md).
   *was*. A Smith predictor (`robofield/control/predictor.py`) replays the commands already in
   flight through the motor model, so the controllers steer on where the robot *will be*.
 - **Unequal, non-linear motors.** The left wheel runs ~8% faster, and the slowest the car can move
-  is ~100 mm/s. `tools/calibrate_motors.py` measures the speed-per-command curve and the trim, and
-  every controller maps its speed requests through them.
+  is ~100 mm/s. The measured speed-per-command curve and the left/right trim are part of the robot
+  model, and every controller maps its speed requests through them ([kinematics](docs/kinematics.md)).
 - **Turning precisely.** Turning in place needs a hard kick to break the wheels free, then coasts
   far past the target, so a continuous controller oscillates left and right. Final turns are
   instead single-wheel pivot pulses, each followed by a wait longer than the delay, sized by a
@@ -54,9 +54,14 @@ Full write-up with the data: [`docs/control.md`](docs/control.md).
 
 ## Quick start
 
+No hardware needed to try it: the simulator runs the same code.
+
 ```bash
+git clone https://github.com/jolianjij/robofield.git
+cd robofield
 pip install -e ".[dev,rl,sim]"
-python tools/control_center.py                                  # simulator, no hardware
+pytest                                                           # 18 tests, no hardware
+python tools/control_center.py                                  # simulator
 python tools/control_center.py --real --pi <pi-address>          # real field
 ```
 
@@ -66,13 +71,27 @@ Open `http://localhost:8000` (map, cars, go-to-pose, draw a path, safety, camera
 On the Pi: `pi/install.sh`, then `.venv/bin/python pi/pi_tracker.py --preview 8080`. Calibrate the
 camera once with `pi/pi_calibrate.py` (see [`pi/README.md`](pi/README.md)).
 
+## Documentation
+
+New here? Read [Getting started](docs/getting_started.md): RoboField in five minutes, then a
+simulated car, then the real field step by step. Everything else is listed in [`docs/`](docs/README.md):
+
+| | |
+|---|---|
+| [Architecture](docs/architecture.md) | Every package and module, and one control cycle from camera frame to wheel |
+| [Kinematics](docs/kinematics.md) | The differential-drive model and the measured motor model, with worked numbers |
+| [Motion control](docs/control.md) | Delay prediction, the EKF, pure pursuit, pulse-and-wait turns |
+| [Tuning guide](docs/tuning.md) | Every parameter, and what to change for a given symptom |
+| [Control Center](docs/control_center.md) | The web app, the safety rules, the JSON API |
+| [Testing and results](docs/testing.md) | The test suite and the measured results on the real car |
+
 ## Tools
 
 | Command | What it does |
 |---|---|
 | `tools/cars.py list` / `test 0` | find cars on the network; drive one through a self-test |
 | `tools/measure_latency.py` | measure the command-to-camera delay on the real field |
-| `tools/calibrate_motors.py --write` | measure speed-per-command and trim, write them to the config |
+| `tools/calibrate_motors.py --write` | measure top wheel speed and left/right trim, write them to the config |
 | `tools/eval_motion.py` | score straight lines, turns and curves on the real field |
 | `tools/demo.py wander\|figure8\|square` | demo drives |
 | `tools/film_move.py hook` / `compare --style both` | film a saved move: camera video + Control Center screen recording + a score |
@@ -93,8 +112,8 @@ camera once with `pi/pi_calibrate.py` (see [`pi/README.md`](pi/README.md)).
 | `firmware/car_esp8266/` | **the firmware the cars run** (Wemos D1 Mini + DRV8833, Arduino IDE) |
 | `firmware/car/`, `firmware/gateway/` | earlier ESP32-C3 / PlatformIO versions, same protocol |
 | `config/field.yaml` | every measurement: field, towers, camera, robot model, delay |
-| `hardware/` | printable field tiles, towers, camera mast (STEP/STL + generators) |
-| `docs/` | coordinate system, protocol, field, vision, control |
+| `hardware/` | the car's parts and wiring; CAD assemblies of the car and the field |
+| `docs/` | [all the documentation](docs/README.md): getting started, architecture, kinematics, control, tuning, testing |
 | `tests/` | `pytest`: control, vision, protocol, safety, the full real-field stack against a simulated field |
 
 ## License

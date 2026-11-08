@@ -20,4 +20,6 @@ Every module uses this frame. No exceptions.
    (0,0) ─────────────► x
 ```
 
-A robot's pose is `(x, y, theta)` of its marker centre on the marker plane (z = 45 mm).
+A robot's pose is `(x, y, theta)` of its marker centre, measured on the plane at the marker's
+height (`vision.robot_marker_height_mm`, 84 mm on the current car). The marker sits right above
+the midpoint between the wheels, so this is also the point the car turns around ([kinematics](kinematics.md)).

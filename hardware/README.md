@@ -1,58 +1,74 @@
-# Car hardware (reference build v1)
+# Hardware
 
-Footprint: 70 × 50 mm. Tank drive.
-
-## Parts list (per car)
-
-| Part | Spec | Qty |
-|---|---|---|
-| Controller | ESP32-C3 Super Mini | 1 |
-| Motors | N20 gear motor, 12V, 200 rpm | 2 |
-| Motor driver | TB6612FNG module | 1 |
-| Battery | 18650 cell, 3.5 Ah, high-drain | 1 |
-| Battery protection | 1S protection board | 1 |
-| Charging (optional) | 1S USB-C charge module | 1 |
-| Boost converter | TPS61088 module, set to 12.0 V | 1 |
-| Buck converter | 5 V, 2 A+ (e.g. Mini560) | 1 |
-| Gripper servo | SG90 / MG90S | 1 |
-| LEDs | WS2812B | 3 |
-| Capacitors | 470 µF (boost out, servo), 100 µF (TB6612 VM), 100 nF (ADC) | 1 each |
-| Resistors | 100 kΩ × 2 (battery divider), 330 Ω (LED data) | — |
-| Switch, polyfuse (2 A) | | 1 each |
-| ArUco marker | 35 mm, ID 10 + robot number | 1 |
-
-## Power path
-
-```
-18650 ─ protection ─ switch ─ fuse ─┬─ boost 12V ─┬─ TB6612 VM (+100 µF)
-                                    │             └─ buck 5V ─┬─ ESP32 5V pin
-                                    │                         ├─ servo (+470 µF)
-                                    │                         └─ LEDs
-                                    └─ 100k/100k divider ─ GPIO0
-ESP32 3V3 ─ TB6612 VCC        All grounds common.
-```
-
-## Pin map (ESP32-C3 Super Mini)
-
-| GPIO | Function |
+| Folder | Contents |
 |---|---|
-| 1 | PWMA (left speed) |
-| 3 / 4 | AIN1 / AIN2 |
-| 5 | PWMB (right speed) |
-| 6 / 7 | BIN1 / BIN2 |
-| 21 | STBY |
-| 20 | Servo |
-| 10 | LED data (via 330 Ω) |
-| 0 | Battery voltage (divider) |
+| [`car/`](car/README.md) | The full CAD assembly of the car |
+| [`field/`](field/README.md) | The full CAD assembly of the field: floor, walls, towers, camera mast |
 
-Avoid GPIO 2, 8, 9 (strapping pins).
+The numbers the software needs from the hardware (field size, tower positions and heights, the
+car's track, wheel size and marker height) live in `config/field.yaml`; see [field](../docs/field.md)
+and [kinematics](../docs/kinematics.md).
 
-## First power-up checklist
+## The car
 
-1. Set the boost to 12.0 V and the buck to 5.0 V with a multimeter **before** connecting loads.
-2. Flash `firmware/car`, check the serial log shows "ready".
-3. Run `examples/motor_test.py` with the car lifted off the table.
-4. Stress test: both motors + servo at full load — the ESP32 must not reset.
+A small differential-drive robot: two driven wheels near the middle, a ball caster at the front,
+and a 40 mm ArUco marker on top, centred over the axle. It has no sensors; the overhead camera is
+its only sense.
 
-Car CAD/STL files: `hardware/cad/` (coming in Phase 1).
-Field tiles and pins: `hardware/field/` — see `docs/field.md`.
+| | |
+|---|---|
+| Footprint | 70 × 50 mm |
+| Marker height | 84 mm above the floor |
+| Wheel track | 56 mm (wheel centre to wheel centre) |
+| Wheel diameter | 33 mm |
+| Mass | about 220 g |
+| Top speed | 340 mm/s measured; slowest steady speed about 100 mm/s |
+
+### Parts (per car)
+
+| Part | Notes |
+|---|---|
+| Wemos D1 Mini (ESP8266) | WiFi, runs `firmware/car_esp8266/` |
+| DRV8833 dual motor driver | Two inputs per motor; has its own current limit and thermal shutdown |
+| 2 × N20 gear motors with 33 mm wheels | |
+| Ball caster | At the front |
+| 2S Li-ion / LiPo pack, 7.4–8.4 V | Straight to the DRV8833's motor supply (VM, 10.8 V max) |
+| 5 V buck converter | Powers the D1 Mini, the servo and the LEDs |
+| Micro servo | Gripper |
+| 3 × WS2812B RGB LEDs | Team colours, identify blink, e-stop red |
+| 100 kΩ + 33 kΩ resistors | Battery voltage divider into A0 |
+| ArUco marker, 40 mm, matte | ID 10 + robot number |
+
+### Wiring
+
+| Function | D1 Mini pin | Notes |
+|---|---|---|
+| Right motor IN1 / IN2 | D5 / D6 | DRV8833 |
+| Left motor IN1 / IN2 | D7 / D3 | D3 is GPIO0, a boot pin: it works, but add nothing else to it |
+| Gripper servo | D2 | Shares the on-board LED, which flickers with the servo (harmless) |
+| WS2812B data | D1 | |
+| Battery sense | A0 | 100k / 33k divider; reading switched off in the firmware for now |
+
+```
+2S pack ─ switch ─┬─ DRV8833 VM ── motors
+                  ├─ 5 V buck ─┬─ D1 Mini 5V
+                  │            ├─ servo
+                  │            └─ LEDs
+                  └─ 100k / 33k divider ─ A0
+All grounds common.
+```
+
+### Lessons from the first build
+
+- The first controller, an ESP32-C3, burned out, most likely from 5 V reaching a GPIO pin. Check
+  every supply line with a multimeter before plugging the board in.
+- The first motor driver, an L9110S, burned out from the current spike of reversing a motor at
+  full speed. The DRV8833 handles it with its own current limiting. If a driver burns out again,
+  re-enable the short pause before reversing in the firmware (`REVERSE_DEAD_MS`).
+- Lift the car off the table for its first motor test (`python tools/cars.py test 0`).
+
+## The field
+
+A 1 × 1 m floor of 4 × 4 tiles with 100 mm walls, four tracking towers just outside the corners
+(markers at 140–260 mm), and a mast holding the Raspberry Pi 5 and its Camera Module 3 Wide about
+1.3 m above the centre. Everything the software needs is listed in [field](../docs/field.md).

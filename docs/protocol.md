@@ -37,7 +37,7 @@ All multi-byte fields are **little-endian**. Every packet ends with a CRC-8
 | 2 | type | u8 | `0x02` = status |
 | 3 | robot_id | u8 | |
 | 4 | seq_ack | u16 | last command seq received |
-| 6 | battery_mv | u16 | cell voltage in mV |
+| 6 | battery_mv | u16 | pack voltage in mV (0 while the firmware's battery monitor is off) |
 | 8 | fw_version | u8 | |
 | 9 | status | u8 | bit0 = watchdog tripped, bit1 = low battery |
 | 10 | rssi | i8 | dBm of last received command |
@@ -56,5 +56,6 @@ The gateway forwards the packet bytes unchanged in both directions.
 ## Safety rules (firmware must implement)
 
 - **Watchdog:** no valid command for 200 ms → motors off (STBY low), status bit0 set.
-- **Low battery:** cell below 3.3 V → motors off, status bit1 set, LEDs blink red.
+- **Low battery** (when `ENABLE_BATTERY_MONITOR` is on): 2S pack below 6.6 V → motors off,
+  status bit1 set, LEDs blink red; back on above 7.0 V.
 - Packets with a bad magic, version or CRC are dropped silently.

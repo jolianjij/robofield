@@ -33,7 +33,8 @@ the corner markers give the camera's pose in the field frame.
 1. The corners of every visible tower marker (known 3D positions at 140–260 mm) go into
    `solvePnP` → camera pose in the field frame. Non-coplanar points make it very stable,
    and any 2 towers are enough if the others are blocked.
-2. Each robot marker corner pixel becomes a 3D ray, intersected with the plane z = 45 mm.
+2. Each robot marker corner pixel becomes a 3D ray, intersected with the horizontal plane at the
+   car's marker height (`vision.robot_marker_height_mm`, 84 mm on the current car).
 
 - No parallax error (the robot height is in the geometry).
 - No per-marker PnP, so no IPPE orientation flips on small robot markers.
@@ -53,8 +54,8 @@ marker gives ~30 px. Test both on the real field before printing many.
 
 | Idea | Why |
 |---|---|
-| Kalman / EKF filter with a unicycle model + commanded wheel speeds | Smooths noise, estimates velocity, bridges dropped frames |
-| Latency compensation | Predict the pose ~50–100 ms ahead to match "now" |
+| ~~Kalman / EKF filter~~ | **Done:** `robofield/control/estimator.py`, one per car on the laptop ([motion control](control.md)) |
+| ~~Latency compensation~~ | **Done:** the delay predictor reports every pose 0.2 s ahead by replaying the commands in flight ([motion control](control.md)) |
 | AprilTag 36h11 dictionary | Fewer false detections, better corner accuracy |
 | ROI tracking | Search only near last known positions → higher fps |
 | Two markers per robot | Redundancy and better heading (space permitting) |

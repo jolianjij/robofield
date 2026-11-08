@@ -22,9 +22,11 @@ bash pi/install.sh
 ```
 
 ## 4. Calibrate the lens (once)
-Print a 9 x 6 inner-corner chessboard with 25 mm squares, tape it flat to cardboard.
+Print a chessboard, tape it flat to cardboard, and measure one square. `--cols` and `--rows` count
+the **inner** corners (where four squares meet), not the squares. The reference build used a board
+of 9 × 6 squares (8 × 5 inner corners) with 28 mm squares:
 ```bash
-.venv/bin/python pi/pi_calibrate.py --cols 9 --rows 6 --square 25
+.venv/bin/python pi/pi_calibrate.py --cols 8 --rows 5 --square 28
 ```
 Move the board slowly under the camera, covering the whole image, especially the corners,
 tilted different ways. After 30 captures it saves `pi/camera.npz`. RMS under 0.5 px is good.

@@ -1,5 +1,10 @@
 # PlatformIO with VS Code: from zero to a car running RoboField firmware
 
+> **Legacy.** This guide is for the original ESP32-C3 firmware in `firmware/car/`. The cars now run
+> the Wemos D1 Mini (ESP8266) firmware in `firmware/car_esp8266/`, flashed from the Arduino IDE; see
+> [its README](../firmware/car_esp8266/README.md). The radio protocol is the same, so either works
+> with the laptop software.
+
 ## 1. Install (once)
 1. Install **VS Code**: https://code.visualstudio.com
 2. In VS Code open **Extensions** (left bar, the four-squares icon, or `Ctrl+Shift+X`),
