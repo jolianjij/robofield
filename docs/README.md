@@ -18,6 +18,7 @@ Start at the top if you are new; jump to any page once you know your way around.
 | [Kinematics and motor model](kinematics.md) | The differential-drive equations, the measured motor curve, trim, pivot turns, with worked numbers |
 | [Motion control](control.md) | Delay prediction, the EKF, pure pursuit, pulse-and-wait turns, with the real-car measurements behind each choice |
 | [Vision](vision.md) | ArUco tracking on the Pi: three pose estimators and why the default one is used |
+| [Reinforcement learning](reinforcement_learning.md) | What RL is, how the race policy was trained, train your own, take it to the real car, and the plan for two-car football |
 | [Testing and results](testing.md) | The automated test suite, the real-field measurement tools, and the measured results |
 
 ## Reference

@@ -83,6 +83,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 | [Motion control](docs/control.md) | Delay prediction, the EKF, pure pursuit, pulse-and-wait turns |
 | [Tuning guide](docs/tuning.md) | Every parameter, and what to change for a given symptom |
 | [Control Center](docs/control_center.md) | The web app, the safety rules, the JSON API |
+| [Reinforcement learning](docs/reinforcement_learning.md) | Train a policy in the simulator and run it on the real car, step by step |
 | [Testing and results](docs/testing.md) | The test suite and the measured results on the real car |
 
 ## Tools
