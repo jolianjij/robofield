@@ -56,6 +56,15 @@ class Game(ABC):
     def info(self, ws: WorldState) -> dict:
         return {}
 
+    def begin(self, ws: WorldState) -> None:
+        """Start an episode from the situation as it is, without placing anything. The real field
+        cannot teleport cars, so a policy run there starts here instead of from layout(): reset
+        the game's bookkeeping (progress, targets...) from `ws`."""
+
+    def ready(self, ws: WorldState) -> tuple[bool, str]:
+        """Can an episode start from `ws` (see begin)? (False, why) if the cars must be moved first."""
+        return True, ""
+
     def overlays(self) -> list[dict]:
         """Virtual objects for visualisation: [{"type": "circle", "x":..,"y":..,"r":..,"color":..}]."""
         return []

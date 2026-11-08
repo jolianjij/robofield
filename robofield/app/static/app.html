@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboField</title>
+<style>
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #1d2430; --muted: #5d6675; --line: #d7dbe2;
+  --blue: #1f3a93; --accent: #1f3a93; --ok: #2e7d32; --warn: #c77700; --bad: #c62828;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a21; --panel: #1f242d; --ink: #e8ebf0; --muted: #9aa3b2; --line: #333a46;
+    --accent: #7f9cf5; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex; flex-direction: column; }
+button, input, select { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 6px; padding: 0 14px; height: 52px; background: var(--panel);
+  border-bottom: 1px solid var(--line); flex: none; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; margin-right: 14px; letter-spacing: .2px; }
+.brand svg { width: 26px; height: 26px; }
+nav { display: flex; gap: 2px; height: 100%; }
+nav button { border: none; background: none; padding: 0 14px; height: 100%; cursor: pointer; color: var(--muted);
+  border-bottom: 3px solid transparent; font-weight: 550; white-space: nowrap; }
+nav button:hover { color: var(--ink); }
+nav button.active { color: var(--ink); border-bottom-color: var(--accent); }
+nav button:focus-visible, .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.spacer { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button { border: none; background: var(--panel); padding: 6px 12px; cursor: pointer; color: var(--muted); white-space: nowrap; }
+.seg button.on { background: var(--accent); color: #fff; }
+.opt { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; margin-left: 8px; }
+.opt input, .opt select { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 4px 7px; }
+.opt input { width: 132px; }
+.pill { padding: 3px 10px; border-radius: 999px; font-size: 12.5px; border: 1px solid var(--line); margin-left: 10px; white-space: nowrap; }
+.pill.ok { color: var(--ok); border-color: currentColor; }
+.pill.bad { color: var(--bad); border-color: currentColor; }
+.pill.warn { color: var(--warn); border-color: currentColor; }
+main { position: relative; flex: 1; min-height: 0; }
+main iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: none; background: var(--bg); }
+main iframe.show { display: block; }
+#busy { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 5;
+  background: color-mix(in srgb, var(--bg) 75%, transparent); font-size: 16px; font-weight: 600; }
+#busy.show { display: flex; }
+#busy span { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 26px; }
+@media (max-width: 900px) { .opt label { display: none; } nav button { padding: 0 9px; } .brand span { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand" aria-label="RoboField">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="6" fill="none" stroke="currentColor" stroke-width="2.4"/>
+      <rect x="9" y="11" width="14" height="10" rx="2" fill="currentColor"/><circle cx="9" cy="21" r="2.6" fill="currentColor"/><circle cx="23" cy="21" r="2.6" fill="currentColor"/></svg>
+    <span>RoboField</span>
+  </div>
+  <nav role="tablist">
+    <button role="tab" data-tab="field">Field</button>
+    <button role="tab" data-tab="view3d">3D view</button>
+    <button role="tab" data-tab="training">Training</button>
+    <button role="tab" data-tab="tools">Tools</button>
+    <button role="tab" data-tab="tuning">Tuning</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="seg" role="group" aria-label="Simulator or real field">
+    <button id="modeSim" data-mode="sim">Simulation</button>
+    <button id="modeReal" data-mode="real">Real field</button>
+  </div>
+  <div class="opt" id="simOpt"><label for="simCars">cars</label>
+    <select id="simCars" title="Number of simulated cars"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+  <div class="opt" id="realOpt"><label for="piAddr">Pi</label>
+    <input id="piAddr" placeholder="found automatically" title="The Pi tracker's address. Leave empty to find it on the network"></div>
+  <span id="status" class="pill">…</span>
+</header>
+<main>
+  <div id="busy"><span id="busyText">Switching…</span></div>
+</main>
+<script>
+const PAGES = { field: "/", view3d: "/view3d", training: "/training", tools: "/tools", tuning: "/tuning" };
+const main = document.querySelector("main");
+const frames = {};
+let app = null;
+
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+function show(tab) {
+  if (!PAGES[tab]) tab = "field";
+  if (!frames[tab]) {
+    const f = document.createElement("iframe");
+    f.src = PAGES[tab]; f.title = tab;
+    main.appendChild(f); frames[tab] = f;
+  }
+  for (const [k, f] of Object.entries(frames)) f.classList.toggle("show", k === tab);
+  document.querySelectorAll("nav button").forEach(b => {
+    b.classList.toggle("active", b.dataset.tab === tab); b.setAttribute("aria-selected", b.dataset.tab === tab);
+  });
+  store("rf_tab", tab);
+}
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+
+function render() {
+  if (!app) return;
+  document.getElementById("modeSim").classList.toggle("on", app.mode === "sim");
+  document.getElementById("modeReal").classList.toggle("on", app.mode === "real");
+  document.getElementById("simOpt").style.display = app.mode === "sim" ? "" : "none";
+  document.getElementById("simCars").value = String(app.sim_robots);
+  const pi = document.getElementById("piAddr");
+  if (document.activeElement !== pi) pi.value = app.pi || "";
+  const st = document.getElementById("status");
+  if (app.status !== "ready") { st.textContent = app.status + "…"; st.className = "pill warn"; }
+  else if (app.error) { st.textContent = "error"; st.title = app.error; st.className = "pill bad"; }
+  else if (app.mode === "sim") { st.textContent = "simulator"; st.title = ""; st.className = "pill ok"; }
+  else { st.textContent = app.pi ? "real field" : "real field · no Pi"; st.title = app.pi ? "Pi tracker at " + app.pi : "No tracker heard on the network";
+         st.className = app.pi ? "pill ok" : "pill bad"; }
+}
+
+async function poll() {
+  try { app = await api("/api/app"); render(); } catch (e) {
+    const st = document.getElementById("status"); st.textContent = "app not responding"; st.className = "pill bad";
+  }
+}
+
+async function switchMode(mode) {
+  if (app && mode === app.mode && mode === "sim" && +document.getElementById("simCars").value === app.sim_robots) return;
+  const busy = document.getElementById("busy");
+  document.getElementById("busyText").textContent = mode === "real"
+    ? "Connecting to the real field… (looking for the Pi tracker)" : "Starting the simulator…";
+  busy.classList.add("show");
+  try {
+    const res = await api("/api/app/mode", { mode, pi: document.getElementById("piAddr").value.trim() || null,
+                                             sim_robots: +document.getElementById("simCars").value });
+    if (!res.ok) alert(res.msg);
+  } finally {
+    busy.classList.remove("show");
+    await poll();
+  }
+}
+document.getElementById("modeSim").addEventListener("click", () => switchMode("sim"));
+document.getElementById("modeReal").addEventListener("click", () => switchMode("real"));
+document.getElementById("simCars").addEventListener("change", () => switchMode("sim"));
+document.getElementById("piAddr").addEventListener("keydown", e => { if (e.key === "Enter") switchMode("real"); });
+
+show(store("rf_tab") || "field");
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>

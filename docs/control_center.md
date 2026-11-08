@@ -122,12 +122,16 @@ The page uses these, and so can your own scripts ([example](architecture.md#7-ex
 | `POST /api/tuning` | `{param: value, ...}` | Change tuning; applies from the next goal or path |
 | `POST /api/tuning/save` | | Write the values to `config/tuning.yaml` |
 | `POST /api/tuning/reset` | | Back to the built-in defaults (not saved until you save) |
+| `POST /api/policy` | `{"id", "model", "speed"?, "no_reverse"?, "place"?}` | A trained policy from `models/` drives the car for one episode of its game |
+| `POST /api/sim/place` | `{"id", "x", "y", "theta"}` | Simulator only: put a car at a pose |
+| `GET /api/scene` | | The fixed geometry of the field and cars (for the 3D view) |
 | `GET /api/moves` | | The saved moves |
 | `POST /api/moves/save` | `{"id", "name"}` or `{"name", "points", "theta"}` | Save the car's last path, or the given points |
 | `POST /api/moves/start` | `{"id", "name"}` | Park at the move's start |
 | `POST /api/moves/play` | `{"id", "name"}` | Play the move |
 
-Every POST answers `{"ok": true or false, "msg": "..."}`.
+Every POST answers `{"ok": true or false, "msg": "..."}`. The RoboField app adds routes for switching
+mode, training and tools; all routes are listed at the top of `robofield/app/server.py`.
 
 ## Adding a car
 

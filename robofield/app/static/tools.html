@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboField Tools</title>
+<style>
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #1d2430; --muted: #5d6675; --line: #d7dbe2; --soft: #f5f6f8;
+  --accent: #1f3a93; --ok: #2e7d32; --warn: #c77700; --bad: #c62828; color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a21; --panel: #1f242d; --ink: #e8ebf0; --muted: #9aa3b2; --line: #333a46; --soft: #252b35;
+    --accent: #7f9cf5; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--bad); border-color: currentColor; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 3px 6px; width: 64px; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 1fr 460px; gap: 14px; height: 100%; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; align-content: start; overflow: auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.card h3 { margin: 0; font-size: 14.5px; font-weight: 650; }
+.card p { margin: 0; color: var(--muted); font-size: 13px; flex: 1; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 11.5px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.tag.move { color: var(--warn); border-color: currentColor; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.why { font-size: 12px; color: var(--warn); }
+aside { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; min-height: 0; }
+aside h2 { font-size: 15px; margin: 0 0 8px; }
+.jobs { display: flex; flex-direction: column; gap: 4px; max-height: 30%; overflow: auto; margin-bottom: 8px; }
+.job { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.job.sel { background: var(--soft); }
+.st { font-size: 12px; } .st.running { color: var(--accent); } .st.done { color: var(--ok); } .st.failed { color: var(--bad); } .st.stopped { color: var(--muted); }
+pre { flex: 1; min-height: 0; overflow: auto; background: var(--soft); border-radius: 9px; padding: 10px; margin: 0; font-size: 12px; white-space: pre-wrap; }
+.head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.empty { color: var(--muted); font-size: 13px; }
+@media (max-width: 900px) { .wrap { grid-template-columns: 1fr; height: auto; } aside { min-height: 420px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cards" id="cards"></div>
+  <aside>
+    <h2>Output</h2>
+    <div class="jobs" id="jobs"><div class="empty">Run a tool to see its output here.</div></div>
+    <div class="head"><b id="jobTitle"></b><button class="danger" id="stop" hidden>Stop</button></div>
+    <pre id="log" aria-live="polite"></pre>
+  </aside>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+let tools = [], app = null, current = null, since = 0;
+
+function needsWhy(t) {
+  if (!app) return "";
+  if (t.exclusive && app.mode === "real") return "Switch the app to Simulation first: this tool talks to the cars itself.";
+  if (t.needs === "pi" && !app.pi) return "Needs the Pi tracker: switch to Real field once so the app finds it.";
+  return "";
+}
+function renderCards() {
+  $("#cards").innerHTML = tools.map(t => {
+    const why = needsWhy(t), args = t.args.join(" ");
+    return `<div class="card" data-id="${t.id}">
+      <h3>${esc(t.title)}</h3><p>${esc(t.about)}</p>
+      <div class="tags">${t.moves ? '<span class="tag move">drives a car</span>' : ""}${t.exclusive ? '<span class="tag">needs the field to itself</span>' : ""}${t.needs === "pi" ? '<span class="tag">needs the Pi</span>' : ""}</div>
+      <div class="row">${args.includes("{robot}") ? `car <input type="number" class="robot" min="0" max="19" value="0">` : ""}
+        ${args.includes("{seconds}") ? `seconds <input type="number" class="seconds" min="5" max="600" value="60">` : ""}
+        ${t.write_flag ? `<label><input type="checkbox" class="write" style="width:auto"> save to config</label>` : ""}</div>
+      ${why ? `<div class="why">${esc(why)}</div>` : ""}
+      <div><button class="primary run" ${why ? "disabled" : ""}>Run</button></div></div>`;
+  }).join("");
+}
+$("#cards").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.run"); if (!b) return;
+  const card = b.closest(".card"), t = tools.find(x => x.id === card.dataset.id);
+  const robot = +(card.querySelector(".robot")?.value || 0), seconds = +(card.querySelector(".seconds")?.value || 60);
+  if (t.moves && !confirm(`"${t.title}" will drive car ${robot}${app.mode === "real" || t.exclusive ? " (the real car)" : ""}.\nIs the space around it clear?`)) return;
+  const res = await api("/api/jobs/tool", { tool: t.id, robot, seconds, write: !!card.querySelector(".write")?.checked });
+  if (!res.ok) { alert(res.msg); return; }
+  select(+res.msg);
+});
+
+function select(id) { current = id; since = 0; $("#log").textContent = ""; pollJob(); listJobs(); }
+async function listJobs() {
+  const { jobs } = await api("/api/jobs");
+  const mine = jobs.filter(j => j.kind === "tool");
+  $("#jobs").innerHTML = mine.map(j => `<div class="job ${j.id === current ? "sel" : ""}" data-id="${j.id}">
+      <span>${esc(j.title)}</span><span class="st ${j.status}">${j.status}</span></div>`).join("") || '<div class="empty">Run a tool to see its output here.</div>';
+}
+$("#jobs").addEventListener("click", (e) => { const j = e.target.closest(".job"); if (j) select(+j.dataset.id); });
+$("#stop").addEventListener("click", () => current && api("/api/jobs/stop", { id: current }));
+async function pollJob() {
+  if (current == null) return;
+  const j = await api(`/api/jobs/${current}?since=${since}`);
+  if (j.error) return;
+  $("#jobTitle").textContent = j.title;
+  if (j.lines && j.lines.length) {
+    const pre = $("#log"); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+    pre.textContent += j.lines.join("\n") + "\n"; since = j.n_lines;
+    if (atEnd) pre.scrollTop = pre.scrollHeight;
+  }
+  $("#stop").hidden = j.status !== "running";
+}
+async function tick() {
+  try {
+    const a = await api("/api/app");
+    const changed = !app || a.mode !== app.mode || a.pi !== app.pi;
+    app = a; if (changed) renderCards();
+    await pollJob(); await listJobs();
+  } catch (e) { }
+  setTimeout(tick, 1000);
+}
+(async () => { ({ tools } = await api("/api/tools")); app = await api("/api/app"); renderCards(); tick(); })();
+</script>
+</body>
+</html>

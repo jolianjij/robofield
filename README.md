@@ -24,7 +24,9 @@ can be developed in simulation and then run on the real cars unchanged.
 | **Follow a drawn path** | draw any curve on the map; the car follows it with pure pursuit |
 | **Safety layer** | geofence (it never drives into a wall), collision avoidance, tracking-loss stop, e-stop |
 | **Live tuning** | `/tuning`: every controller and motor parameter on a slider, saved to `config/tuning.yaml` |
-| **Games / RL** | Gymnasium + PettingZoo environments (go-to, sumo, a 3-lap race), PPO training script |
+| **3D view** | the simulator or the real field in 3D: cars, LEDs, paths, the camera's view |
+| **RL in the app** | train a policy with a live learning curve, evaluate it, let it drive a simulated or real car |
+| **Games / RL** | Gymnasium + PettingZoo environments (go-to, sumo, a 3-lap race), PPO training |
 
 Measured on the real car (2026-11-06, `tools/eval_motion.py`):
 
@@ -59,14 +61,14 @@ No hardware needed to try it: the simulator runs the same code.
 ```bash
 git clone https://github.com/jolianjij/robofield.git
 cd robofield
-pip install -e ".[dev,rl,sim]"
-pytest                                                           # 18 tests, no hardware
-python tools/control_center.py                                  # simulator
-python tools/control_center.py --real --pi <pi-address>          # real field
+pip install -e ".[dev,rl,sim,train,app]"
+pytest                                                           # the tests, no hardware
+python tools/robofield_app.py                                   # the app: field, 3D view, training, tools
 ```
 
-Open `http://localhost:8000` (map, cars, go-to-pose, draw a path, safety, camera) and
-`http://localhost:8000/tuning` (live parameters).
+The app opens in the simulator; switch to **Real field** in its top bar ([the app](docs/app.md)).
+`python tools/robofield_app.py --shortcut` puts a RoboField icon on the Windows Desktop. Just the
+Control Center page: `python tools/control_center.py` (`--real --pi <pi-address>` for the field).
 
 On the Pi: `pi/install.sh`, then `.venv/bin/python pi/pi_tracker.py --preview 8080`. Calibrate the
 camera once with `pi/pi_calibrate.py` (see [`pi/README.md`](pi/README.md)).
@@ -78,6 +80,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 
 | | |
 |---|---|
+| [The app](docs/app.md) | Every tab of the RoboField app: field, 3D view, training, tools, tuning |
 | [Architecture](docs/architecture.md) | Every package and module, and one control cycle from camera frame to wheel |
 | [Kinematics](docs/kinematics.md) | The differential-drive model and the measured motor model, with worked numbers |
 | [Motion control](docs/control.md) | Delay prediction, the EKF, pure pursuit, pulse-and-wait turns |
@@ -90,6 +93,8 @@ simulated car, then the real field step by step. Everything else is listed in [`
 
 | Command | What it does |
 |---|---|
+| `tools/robofield_app.py` | **the RoboField app**: everything below in one window |
+| `tools/train.py --game race` | train / evaluate a PPO policy for any one-car game |
 | `tools/cars.py list` / `test 0` | find cars on the network; drive one through a self-test |
 | `tools/measure_latency.py` | measure the command-to-camera delay on the real field |
 | `tools/calibrate_motors.py --write` | measure top wheel speed and left/right trim, write them to the config |
@@ -98,7 +103,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 | `tools/film_move.py hook` / `compare --style both` | film a saved move: camera video + Control Center screen recording + a score |
 | `tools/record_camera.py` / `tools/record_screen.py` | record the Pi camera feed / the Control Center page to MP4 |
 | `tools/real_goto.py` | minimal closed-loop go-to-point test |
-| `tools/train_race.py` | train / evaluate a PPO policy for the 3-lap race |
+| `tools/train_race.py` | the race policy on the real car from the command line |
 
 ## Repository layout
 
@@ -106,7 +111,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 |---|---|
 | `robofield/control/` | kinematics + motor model, EKF, delay predictor, pose / path / turn controllers |
 | `robofield/real/`, `robofield/sim/` | the real field and the MuJoCo simulator, behind one `Backend` interface |
-| `robofield/app/` | Control Center: control loop, safety layer, web GUI and tuning page |
+| `robofield/app/` | Control Center and the app: control loop, safety, policy driving, jobs, web pages, 3D view |
 | `robofield/vision/`, `pi/` | ArUco field tracking (runs on the Raspberry Pi) |
 | `robofield/comm/` | UDP protocol for the cars and for the Pi's pose stream |
 | `robofield/games/`, `robofield/envs/` | game plugins, Gymnasium / PettingZoo environments |

@@ -117,6 +117,10 @@ How these fit together is in [motion control](control.md).
 | `server.py` | `serve()`, `make_handler()` | A small threaded HTTP server: the two web pages plus a JSON API that calls `ControlCenter` methods |
 | `static/index.html` | | The main page: car list, live map, go-to-pose, path drawing, camera, moves, safety, log |
 | `static/tuning.html` | | The tuning page: every parameter as a slider, a test map, live telemetry |
+| `policy.py` | `PolicyDriver` | A trained RL policy driving one car, inside the Control Center (so through safety). Mode `policy` |
+| `runtime.py` | `AppRuntime`, `TOOLS` | The app: one Control Center switchable between simulator and real field, the trained policies, starting jobs |
+| `jobs.py` | `JobManager` | Training, evaluation and tools as background processes, their output and learning curves |
+| `static/app.html`, `view3d.html`, `training.html`, `tools.html` | | The app's shell with its tabs, the three.js 3D view, the Training and Tools tabs |
 
 Everything that wants to move a car (the web page, `tools/demo.py`, `tools/film_move.py`,
 `tools/eval_motion.py`, a future game or RL policy) goes through `ControlCenter`, so it all gets the
@@ -201,7 +205,9 @@ Wiring, flashing and the known trade-offs: [`firmware/car_esp8266/README.md`](..
 
 | Tool | Use it to |
 |---|---|
-| `control_center.py` | Start the Control Center (simulator by default, `--real --pi <ip>` for the field) |
+| `robofield_app.py` | **The RoboField app** ([app](app.md)): every page below in one window, simulator or real field |
+| `control_center.py` | Just the Control Center (simulator by default, `--real --pi <ip>` for the field) |
+| `train.py` | Train or evaluate a PPO policy for any one-car game; the app's Training tab runs it |
 | `cars.py` | List cars on the network, set a car's id, run a self-test, drive with the keyboard |
 | `measure_latency.py` | Measure the command-to-camera delay of your setup |
 | `calibrate_motors.py` | Measure the top wheel speed and the left/right trim, optionally write them to the config |
@@ -276,6 +282,7 @@ The loop cannot make this shorter, so it predicts across it instead ([motion con
 | Control loop | `ControlCenter.start()` | `step_once()` then `backend.step()`, forever. An exception is logged and the loop continues |
 | HTTP server threads | `serve()` (`ThreadingHTTPServer`) | One per request; each calls a `ControlCenter` method |
 | Move threads | `move_to_start()`, `play_move()` | Park the car at a move's start (two legs), then start the path |
+| Job readers | `JobManager.start()` (the app) | One per background process: collect its output, learning curve and result |
 | Pi preview | `pi_tracker.py` | Serves MJPEG frames while the main thread tracks |
 
 `ControlCenter.lock` (a re-entrant lock) guards the shared state: modes, controllers, profiles,
@@ -330,7 +337,7 @@ cc.update_car(1, leds=[[255, 0, 0]] * 3)
 implement `layout`, `observe`, `reward` and `done`, and set `obs_dim`. It is then available to
 `RoboFieldEnv(game="mygame")`.
 
-**Add a controller mode:** give `ControlCenter` a new mode name and a branch in `step_once()` that
+**Add a controller mode:** like `policy` (an RL policy, `robofield/app/policy.py`), give `ControlCenter` a new mode name and a branch in `step_once()` that
 produces a `RobotCommand`. Everything after that point (speed limits, safety, LEDs, sending) is
 shared.
 

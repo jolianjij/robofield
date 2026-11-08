@@ -68,6 +68,21 @@ class Race(Game):
     lateral_frac = 0.6               # orient itself first; and anywhere across the lane (this fraction
                                      # of the half width either side), like a car put down by hand
 
+    def begin(self, ws):
+        r = ws.robots[0]
+        self._raw_s_prev, _, _ = self._project(r.x, r.y)
+        self._progress = 0.0
+        self._laps = 0
+        self._off_track = False
+
+    def ready(self, ws):
+        r = ws.robots[0]
+        _, lateral, _ = self._project(r.x, r.y)
+        if abs(lateral) > self.half_width:
+            return False, (f"the car is {abs(lateral):.0f} mm from the lane centre (the lane is "
+                           f"±{self.half_width:.0f} mm): put it on the outer ring of tiles")
+        return True, ""
+
     def layout(self):
         start_s = self.rng.uniform(0, self.perimeter)
         cx, cy, heading = self._pose_at(start_s)

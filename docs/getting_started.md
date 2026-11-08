@@ -61,18 +61,22 @@ All tests run without hardware.
 ## 3. Drive a simulated car
 
 ```bash
-python tools/control_center.py
+pip install -e ".[train,app]"
+python tools/robofield_app.py
 ```
 
-A browser tab opens at `http://localhost:8000` with two simulated cars. Try, in order:
+The RoboField window opens on the **Field** tab, with two simulated cars ([the app](app.md)). Try, in order:
 
 1. **Go to pose.** Choose **Go to pose** above the map, press on the field where the car should go,
    drag toward where it should face, release. Watch it turn to face the path, drive, stop, then turn
    to the heading. The car's card shows the phase: TURN, FOLLOW, ALIGN.
 2. **Draw a path.** Choose **Draw path** and draw any curve. The car follows it.
 3. **Drive by hand.** Click a car, then hold W A S D. Space stops it; Esc is the emergency stop.
-4. **Change how it drives.** Open `http://localhost:8000/tuning`, raise the cruise speed, set a
-   goal on that page's map, and watch the difference ([tuning guide](tuning.md)).
+4. **Change how it drives.** Open the **Tuning** tab, raise the cruise speed, set a goal on that
+   page's map, and watch the difference ([tuning guide](tuning.md)).
+5. **See it in 3D.** The **3D view** tab shows the same field; press **Follow** to ride behind a car.
+6. **Let a trained policy drive.** On the **Training** tab, press **Drive** next to a policy, or
+   train your own in a minute with *Quick test* ([reinforcement learning](reinforcement_learning.md)).
 
 Every panel is described in [Control Center](control_center.md).
 
@@ -147,10 +151,10 @@ while these run. Details: [kinematics](kinematics.md#7-updating-the-model-for-a-
 ### Step 6: first closed-loop drive
 
 ```bash
-python tools/control_center.py --real --pi <pi-address>
+python tools/robofield_app.py --real
 ```
 
-The car appears in the Cars list. Press **Identify** to make sure it is the right one, then use
+The app finds the Pi on the network by itself. The car appears in the Cars list on the Field tab. Press **Identify** to make sure it is the right one, then use
 **Go to pose**.
 
 **Check:** it arrives within about 12 mm and 4° of the goal without swinging back and forth. If it

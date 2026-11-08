@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboField Training</title>
+<style>
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --ink: #1d2430; --muted: #5d6675; --line: #d7dbe2; --soft: #f5f6f8;
+  --accent: #1f3a93; --ok: #2e7d32; --warn: #c77700; --bad: #c62828; --s1: #1f6feb; --s2: #2e9d57;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161a21; --panel: #1f242d; --ink: #e8ebf0; --muted: #9aa3b2; --line: #333a46; --soft: #252b35;
+    --accent: #7f9cf5; --s1: #6ea8ff; --s2: #5cc98a; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--bad); border-color: currentColor; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input, select { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 5px 8px; }
+.num { font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 14px;
+  grid-template-columns: 360px 1fr; grid-template-areas: "new run" "models models"; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+h2 { font-size: 15px; margin: 0 0 4px; font-weight: 650; }
+.lead { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+.field { display: grid; gap: 4px; margin-bottom: 10px; }
+.field > span { font-size: 12.5px; color: var(--muted); font-weight: 550; }
+.field select, .field input { width: 100%; }
+.inline { display: flex; gap: 8px; align-items: center; }
+.hint { font-size: 12.5px; color: var(--muted); }
+#new { grid-area: new; } #run { grid-area: run; } #models { grid-area: models; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+.stat { background: var(--soft); border-radius: 9px; padding: 8px 10px; }
+.stat b { display: block; font-size: 18px; font-weight: 650; }
+.stat span { font-size: 12px; color: var(--muted); }
+.bar { height: 8px; background: var(--soft); border-radius: 99px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+canvas { width: 100%; height: 260px; display: block; }
+.legend { display: flex; gap: 14px; font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+pre { background: var(--soft); border-radius: 9px; padding: 8px 10px; max-height: 160px; overflow: auto; font-size: 12px; margin: 8px 0 0; white-space: pre-wrap; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+td.r, th.r { text-align: right; }
+tr.sel td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.acts button { padding: 4px 9px; font-size: 13px; }
+.drivebar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; background: var(--soft); border-radius: 9px; margin: 10px 0; }
+.drivebar label { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.msg { font-size: 13px; min-height: 18px; margin-top: 6px; }
+.msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+.tag { font-size: 11.5px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.live { border-left: 4px solid var(--c, var(--accent)); padding: 4px 10px; margin: 6px 0; font-size: 13px; }
+@media (max-width: 900px) { .wrap { grid-template-columns: 1fr; grid-template-areas: "new" "run" "models"; } .stats { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section id="new">
+    <h2>Train a new policy</h2>
+    <p class="lead">Trains in the simulator with PPO. Many simulators run in parallel, each slightly different, so the policy also works on the real car.</p>
+    <label class="field"><span>Game</span><select id="game"></select></label>
+    <div class="hint" id="gameAbout" style="margin:-4px 0 10px"></div>
+    <label class="field"><span>Name</span><input id="name" placeholder="automatic: game + date" maxlength="60"></label>
+    <label class="field"><span>Length</span>
+      <select id="steps">
+        <option value="100000">Quick test · 100k steps</option>
+        <option value="500000">Short · 500k steps</option>
+        <option value="2000000" selected>Standard · 2M steps</option>
+        <option value="5000000">Long · 5M steps</option>
+      </select></label>
+    <label class="field"><span>Parallel simulators</span>
+      <div class="inline"><input id="envs" type="number" min="1" max="32" style="width:80px"><span class="hint" id="eta"></span></div></label>
+    <label class="field"><span>Continue from</span><select id="resume"><option value="">nothing: start from scratch</option></select></label>
+    <label class="inline" style="margin:4px 0 12px"><input type="checkbox" id="randomize" checked> <span class="hint">Randomize the simulator (friction, delay, motors). Keep on for the real car.</span></label>
+    <button class="primary" id="start">Start training</button>
+    <div class="msg" id="newMsg" role="status"></div>
+  </section>
+
+  <section id="run">
+    <div class="inline" style="justify-content:space-between">
+      <div><h2 id="runTitle">Learning curve</h2><div class="hint" id="runSub">Start a training run, or pick a policy below to see its curve.</div></div>
+      <button class="danger" id="stop" hidden>Stop and save</button>
+    </div>
+    <div class="bar" id="barWrap" hidden><i id="bar"></i></div>
+    <div class="stats">
+      <div class="stat"><b id="stReward" class="num">–</b><span>reward per episode</span></div>
+      <div class="stat"><b id="stSuccess" class="num">–</b><span>episodes successful</span></div>
+      <div class="stat"><b id="stSteps" class="num">–</b><span>steps</span></div>
+      <div class="stat"><b id="stFps" class="num">–</b><span>steps per second</span></div>
+    </div>
+    <canvas id="chart" role="img" aria-label="Learning curve: reward and success rate over training steps"></canvas>
+    <div class="legend"><span><i style="background:var(--s1)"></i>reward per episode (left axis)</span><span><i style="background:var(--s2)"></i>success rate (right axis, 0–100%)</span></div>
+    <details><summary>Output</summary><pre id="log"></pre></details>
+  </section>
+
+  <section id="models">
+    <h2>Trained policies</h2>
+    <p class="lead">Click a row to see its curve. <b>Evaluate</b> runs it in the simulator and scores it. <b>Drive</b> lets it control a car here, through the safety layer: watch it on the Field or 3D tab.</p>
+    <div class="drivebar">
+      <label>Car <select id="car"></select></label>
+      <label>Speed <input type="range" id="speed" min="0.2" max="1" step="0.05" value="0.6"> <span id="speedVal" class="num">60%</span></label>
+      <label><input type="checkbox" id="noReverse"> no reversing</label>
+      <span class="hint" id="modeHint"></span>
+    </div>
+    <div id="liveRuns"></div>
+    <div class="msg" id="modelMsg" role="status"></div>
+    <table>
+      <thead><tr><th>Policy</th><th>Game</th><th class="r">Steps</th><th class="r">Success</th><th class="r">Reward</th><th>Trained</th><th></th></tr></thead>
+      <tbody id="modelRows"><tr><td colspan="7" class="hint">Loading…</td></tr></tbody>
+    </table>
+    <div id="evals"></div>
+  </section>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+let app = null, games = [], models = [], selected = null, trainJob = null, logSince = 0, shownCurve = [];
+const fmtSteps = (n) => n == null ? "–" : n >= 1e6 ? (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+const pct = (v) => v == null ? "–" : Math.round(v * 100) + "%";
+
+// ------------------------------------------------------------------ chart
+function drawChart(curve) {
+  const cv = $("#chart"), dpr = Math.min(2, devicePixelRatio || 1);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const st = getComputedStyle(document.documentElement);
+  const ink = st.getPropertyValue("--muted").trim(), line = st.getPropertyValue("--line").trim();
+  const c1 = st.getPropertyValue("--s1").trim(), c2 = st.getPropertyValue("--s2").trim();
+  g.clearRect(0, 0, w, h);
+  const L = 52, R = 44, T = 10, B = 26, pw = w - L - R, ph = h - T - B;
+  const pts = curve.filter(p => p.ep_rew_mean != null);
+  g.font = "12px system-ui"; g.fillStyle = ink; g.strokeStyle = line; g.lineWidth = 1;
+  if (pts.length < 2) {
+    g.fillText(curve.length ? "Waiting for the first finished episodes…" : "No curve yet.", L, T + 20);
+    return;
+  }
+  const xmax = Math.max(...pts.map(p => p.steps), pts[0].total || 0);
+  let ymin = Math.min(...pts.map(p => p.ep_rew_mean)), ymax = Math.max(...pts.map(p => p.ep_rew_mean));
+  if (ymax - ymin < 1e-6) { ymax += 1; ymin -= 1; }
+  const pad = (ymax - ymin) * 0.08; ymin -= pad; ymax += pad;
+  const X = (s) => L + pw * s / xmax, Y = (v) => T + ph * (1 - (v - ymin) / (ymax - ymin)), Y2 = (v) => T + ph * (1 - v);
+  for (let i = 0; i <= 4; i++) {
+    const yv = ymin + (ymax - ymin) * i / 4, y = Y(yv);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(L + pw, y); g.stroke();
+    g.textAlign = "right"; g.fillText(yv.toFixed(Math.abs(ymax - ymin) < 10 ? 1 : 0), L - 6, y + 4);
+    g.textAlign = "left"; g.fillText(Math.round(i * 25) + "%", L + pw + 6, Y2(i / 4) + 4);
+  }
+  g.textAlign = "center";
+  for (let i = 0; i <= 4; i++) g.fillText(fmtSteps(Math.round(xmax * i / 4)), X(xmax * i / 4), h - 8);
+  const series = (key, color, yf) => {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    pts.forEach((p, i) => { const x = X(p.steps), y = yf(p[key] ?? 0); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+  };
+  if (pts.some(p => p.success != null)) series("success", c2, Y2);
+  series("ep_rew_mean", c1, Y);
+}
+addEventListener("resize", () => drawChart(shownCurve));
+
+function showStats(p) {
+  $("#stReward").textContent = p && p.ep_rew_mean != null ? p.ep_rew_mean.toFixed(1) : "–";
+  $("#stSuccess").textContent = pct(p && p.success);
+  $("#stSteps").textContent = p ? fmtSteps(p.steps) : "–";
+  $("#stFps").textContent = p && p.fps ? p.fps.toLocaleString() : "–";
+}
+
+// ------------------------------------------------------------------ new training
+function updateEta() {
+  const envs = +$("#envs").value || 1, steps = +$("#steps").value;
+  const fps = Math.min(5200, 420 * envs);                 // measured on this kind of laptop, roughly
+  const s = steps / fps;
+  $("#eta").textContent = "about " + (s < 90 ? Math.round(s) + " s" : s < 5400 ? Math.round(s / 60) + " min" : (s / 3600).toFixed(1) + " h");
+}
+$("#envs").addEventListener("input", updateEta); $("#steps").addEventListener("change", updateEta);
+$("#game").addEventListener("change", () => { const g = games.find(x => x.name === $("#game").value); $("#gameAbout").textContent = g ? g.about : ""; fillResume(); });
+function fillResume() {
+  const g = $("#game").value, cur = $("#resume").value;
+  $("#resume").innerHTML = '<option value="">nothing: start from scratch</option>' +
+    models.filter(m => m.game === g).map(m => `<option value="${esc(m.name)}">${esc(m.name)} (${fmtSteps(m.steps)})</option>`).join("");
+  $("#resume").value = models.some(m => m.name === cur && m.game === g) ? cur : "";
+}
+$("#start").addEventListener("click", async () => {
+  const body = { game: $("#game").value, timesteps: +$("#steps").value, envs: +$("#envs").value,
+                 name: $("#name").value.trim() || null, randomize: $("#randomize").checked, resume: $("#resume").value || null };
+  if (body.resume) body.name = body.name || body.resume + "_more";
+  const res = await api("/api/jobs/train", body);
+  $("#newMsg").textContent = res.ok ? "Training started." : res.msg;
+  $("#newMsg").className = "msg " + (res.ok ? "ok" : "bad");
+  if (res.ok) { trainJob = +res.msg; logSince = 0; $("#log").textContent = ""; $("#name").value = ""; }
+});
+$("#stop").addEventListener("click", async () => {
+  if (trainJob == null) return;
+  const res = await api("/api/jobs/stop", { id: trainJob });
+  $("#runSub").textContent = res.msg;
+});
+
+// ------------------------------------------------------------------ the running training job
+async function pollTraining() {
+  try {
+    if (trainJob == null) {
+      const { jobs } = await api("/api/jobs");
+      const j = jobs.find(j => j.kind === "train" && (j.status === "running" || j.status === "stopping"));
+      if (j) { trainJob = j.id; logSince = 0; $("#log").textContent = ""; }
+    }
+    if (trainJob != null) {
+      const j = await api(`/api/jobs/${trainJob}?since=${logSince}`);
+      if (j.lines && j.lines.length) {
+        const pre = $("#log"); pre.textContent += j.lines.join("\n") + "\n"; logSince = j.n_lines;
+        pre.scrollTop = pre.scrollHeight;
+      }
+      const p = j.progress, running = j.status === "running" || j.status === "stopping";
+      $("#runTitle").textContent = j.title;
+      $("#runSub").textContent = running ? (j.status === "stopping" ? "Stopping after this round, then saving…" :
+        `Training · ${p ? Math.round(100 * p.steps / p.total) + "%" : "starting the simulators…"}${p && p.fps ? " · about " + Math.max(1, Math.round((p.total - p.steps) / p.fps / 60)) + " min left" : ""}`)
+        : `${j.status === "done" ? "Finished" : j.status === "stopped" ? "Stopped early (saved)" : "Failed"}${j.result ? " · " + fmtSteps(j.result.timesteps_done) + " steps in " + Math.round(j.result.seconds) + " s" : ""}`;
+      $("#stop").hidden = !running;
+      $("#barWrap").hidden = !running;
+      if (p) $("#bar").style.width = Math.min(100, 100 * p.steps / p.total) + "%";
+      if (j.curve) { shownCurve = j.curve; drawChart(shownCurve); showStats(j.curve.at(-1)); selected = null; markSelected(); }
+      if (!running) { trainJob = null; loadModels(); }
+    }
+  } catch (e) { /* switching modes */ }
+  setTimeout(pollTraining, 1500);
+}
+
+// ------------------------------------------------------------------ trained policies
+async function loadModels() {
+  ({ models } = await api("/api/models"));
+  const rows = models.map(m => `<tr data-name="${esc(m.name)}">
+      <td><b>${esc(m.name)}</b>${m.status && m.status !== "done" && m.status !== "saved" ? ` <span class="tag">${esc(m.status)}</span>` : ""}</td>
+      <td>${esc(m.game || "?")}</td><td class="r num">${fmtSteps(m.steps)}</td><td class="r num">${pct(m.success)}</td>
+      <td class="r num">${m.ep_rew_mean != null ? m.ep_rew_mean.toFixed(1) : "–"}</td><td class="num hint">${esc(m.modified)}</td>
+      <td><div class="acts"><button data-act="eval">Evaluate</button><button data-act="drive" class="primary">Drive</button></div></td></tr>`);
+  $("#modelRows").innerHTML = rows.join("") || '<tr><td colspan="7" class="hint">No policies yet: train one above.</td></tr>';
+  markSelected(); fillResume();
+}
+function markSelected() { document.querySelectorAll("#modelRows tr").forEach(tr => tr.classList.toggle("sel", tr.dataset.name === selected)); }
+$("#modelRows").addEventListener("click", async (e) => {
+  const tr = e.target.closest("tr[data-name]"); if (!tr) return;
+  const name = tr.dataset.name, act = e.target.closest("button")?.dataset.act;
+  if (act === "eval") return evaluate(name);
+  if (act === "drive") return drive(name);
+  if (trainJob != null) return;                       // the live run owns the chart
+  selected = name; markSelected();
+  const { curve } = await api(`/api/models/${encodeURIComponent(name)}/curve`);
+  shownCurve = curve; drawChart(curve); showStats(curve.at(-1));
+  $("#runTitle").textContent = name;
+  $("#runSub").textContent = curve.length ? "Its learning curve while it trained." : "No curve saved for this policy (trained before the app).";
+});
+
+async function drive(name) {
+  const id = +$("#car").value, speed = +$("#speed").value;
+  if (Number.isNaN(id)) { setMsg("No car to drive.", false); return; }
+  if (app && app.mode === "real" && !confirm(`Drive the REAL car ${id} with "${name}" at ${Math.round(speed * 100)}% speed?\n\nIt starts from where the car is. The safety layer stays on; STOP or Esc on the Field tab stops it.`)) return;
+  const res = await api("/api/policy", { id, model: name, speed, no_reverse: $("#noReverse").checked });
+  setMsg(res.ok ? `${res.msg}. Watch it on the Field or 3D tab.` : res.msg, res.ok);
+}
+function setMsg(t, ok) { $("#modelMsg").textContent = t; $("#modelMsg").className = "msg " + (ok ? "ok" : "bad"); }
+
+const evals = [];
+async function evaluate(name) {
+  const res = await api("/api/jobs/eval", { model: name, episodes: 10, randomize: true });
+  if (!res.ok) return setMsg(res.msg, false);
+  evals.unshift({ id: +res.msg, name, job: null });
+  pollEvals();
+}
+async function pollEvals() {
+  let pending = false;
+  for (const e of evals) {
+    if (e.job && e.job.status !== "running") continue;
+    e.job = await api(`/api/jobs/${e.id}?since=0`);
+    if (e.job.status === "running") pending = true;
+  }
+  $("#evals").innerHTML = evals.slice(0, 5).map(e => {
+    const j = e.job, r = j && j.result;
+    const body = !j || j.status === "running" ? "running 10 episodes in randomized simulators…" :
+      r ? `<b>${pct(r.success)}</b> successful · reward ${r.reward_mean} · ${r.seconds_mean} s per episode` : esc((j.lines || []).slice(-2).join(" "));
+    return `<div class="live" style="--c:var(--s2)">Evaluate <b>${esc(e.name)}</b>: ${body}</div>`;
+  }).join("");
+  if (pending) setTimeout(pollEvals, 1000);
+}
+
+// ------------------------------------------------------------------ cars and live policy runs
+async function pollState() {
+  try {
+    app = await api("/api/app");
+    const st = await api("/api/state");
+    const sel = $("#car"), cur = sel.value;
+    const opts = st.robots.map(r => `<option value="${r.id}">${esc(r.name)} (#${r.id})</option>`).join("");
+    if (sel.dataset.opts !== opts) { sel.innerHTML = opts; sel.dataset.opts = opts; if (cur) sel.value = cur; }
+    $("#modeHint").textContent = app.mode === "real" ? "Real field: the policy drives the real car from where it is."
+                                                    : "Simulator: the car is put on one of the game's start positions first.";
+    $("#liveRuns").innerHTML = st.robots.filter(r => r.policy).map(r => {
+      const p = r.policy, info = Object.entries(p.info || {}).map(([k, v]) => `${k} ${typeof v === "number" ? +v.toFixed(2) : v}`).join(", ");
+      return `<div class="live" style="--c:${r.color}"><b>${esc(r.name)}</b> ${p.running ? "driven by" : "was driven by"} <b>${esc(p.model)}</b>
+        · ${p.seconds} s${p.result ? " · " + esc(p.result) : ""} · ${esc(info)}
+        ${p.running ? `<button data-stop="${r.id}" style="margin-left:8px;padding:2px 9px">Stop</button>` : ""}</div>`;
+    }).join("");
+  } catch (e) { }
+  setTimeout(pollState, 700);
+}
+$("#liveRuns").addEventListener("click", (e) => { const b = e.target.closest("[data-stop]"); if (b) api("/api/stop", { id: +b.dataset.stop }); });
+$("#speed").addEventListener("input", () => $("#speedVal").textContent = Math.round($("#speed").value * 100) + "%");
+
+(async function init() {
+  app = await api("/api/app");
+  ({ games } = await api("/api/games"));
+  $("#game").innerHTML = games.filter(g => g.trainable).map(g => `<option value="${g.name}">${g.name}</option>`).join("") +
+    games.filter(g => !g.trainable).map(g => `<option disabled>${g.name} (${g.cars} cars: coming with self-play)</option>`).join("");
+  $("#game").value = games.some(g => g.name === "race") ? "race" : (games.find(g => g.trainable) || {}).name;
+  $("#game").dispatchEvent(new Event("change"));
+  $("#envs").value = Math.max(1, Math.min(12, (app.cpus || 4) - 2));
+  updateEta();
+  await loadModels();
+  drawChart([]);
+  pollTraining(); pollState();
+})();
+</script>
+</body>
+</html>

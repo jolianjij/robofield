@@ -48,5 +48,30 @@
     "max_speed": 1.0,
     "gripper": 0.0,
     "enabled": true
+  },
+  "1": {
+    "id": 1,
+    "name": "car 1",
+    "color": "#e53935",
+    "leds": [
+      [
+        0,
+        0,
+        80
+      ],
+      [
+        0,
+        0,
+        80
+      ],
+      [
+        0,
+        0,
+        80
+      ]
+    ],
+    "max_speed": 1.0,
+    "gripper": 0.0,
+    "enabled": true
   }
 }

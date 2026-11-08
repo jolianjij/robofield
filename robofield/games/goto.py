@@ -26,6 +26,16 @@ class GoToGoal(Game):
         self._last_action = np.zeros(2)
         return {"robots": {0: start}, "objects": {}}
 
+    def begin(self, ws):
+        """A random goal at least 150 mm from wherever the car is."""
+        r = ws.robots[0]
+        while True:
+            goal = self.rng.uniform(120, 880, 2)
+            if math.hypot(goal[0] - r.x, goal[1] - r.y) > 150:
+                break
+        self.goal = tuple(goal)
+        self.reached = False
+
     def observe(self, ws, i=0):
         r = ws.robots[0]
         gx, gy = self.to_robot_frame(r, *self.goal)

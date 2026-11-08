@@ -79,13 +79,15 @@ class ControlCenter:
         self.tuning: dict = self._default_tuning()
         self._load_saved_tuning()
         self._apply_tuning()
-        self.modes: dict[int, str] = {}                 # idle | manual | goal | path
+        self.modes: dict[int, str] = {}                 # idle | manual | goal | path | policy
         self.manual: dict[int, tuple] = {}              # rid -> (left, right, time)
+        self.policies: dict = {}                        # rid -> PolicyDriver (an RL policy driving that car)
         self.identify_until: dict[int, float] = {}
         self.trails: dict[int, list] = {}
         self.log: list[str] = []
         self.flash_jobs: dict[int, dict] = {}
         self.lock = threading.RLock()
+        self._blk = threading.Lock()                    # backend.step() vs placing cars in the simulator
         self.state = backend.state() if hasattr(backend, "state") else None
         self.last_cmds: dict[int, RobotCommand] = {}
         self._overlay = None
@@ -356,6 +358,96 @@ class ControlCenter:
         threading.Thread(target=run, daemon=True).start()
         return True, "going to the start first" if not at_start else "playing"
 
+    # ------------------------------------------------------------------ RL policies and the simulator
+    def place_car(self, rid: int, x: float, y: float, theta: float):
+        """Simulator only: put a car at a pose instantly. The other cars stay where they are."""
+        if self.mode == "real" or not hasattr(self.backend, "true_pose"):
+            return False, "cars can only be placed in the simulator"
+        if not 0 <= rid < getattr(self.backend, "n", 0):
+            return False, f"no simulated car {rid}"
+        with self.lock, self._blk:
+            robots = {i: self.backend.true_pose(i) for i in range(self.backend.n)}
+            robots[rid] = (float(x), float(y), float(theta))
+            self.state = self.backend.reset({"robots": robots, "objects": {}})
+            self.modes[rid] = "idle"
+            self.trails.pop(rid, None)
+            self._gen += 1
+        return True, "placed"
+
+    def _parking_spots(self, n: int, start: tuple, overlays: list) -> list[tuple[float, float]]:
+        """Where to put the cars a one-car game does not use, in the simulator: as far as possible
+        from the driven car's start, from the game's own geometry (a goal, a track) and from the
+        straight line between the start and a goal, so the safety layer's keep-apart rule never
+        blocks a policy that was trained alone on the field."""
+        def seg(a, b, step=40.0):
+            k = max(1, int(math.dist(a, b) // step))
+            return [(a[0] + (b[0] - a[0]) * j / k, a[1] + (b[1] - a[1]) * j / k) for j in range(k + 1)]
+        keep = [tuple(start)]
+        for o in overlays:
+            if o.get("type") in ("circle", "ring"):
+                keep += seg(start, (o["x"], o["y"]))
+            elif o.get("type") == "path":
+                pts = [tuple(p) for p in o["points"]]
+                for a, b in zip(pts, pts[1:]):
+                    keep += seg(a, b)
+        size = self.cfg["field"]["width_mm"]
+        lo, hi = self.margin + 60, size - self.margin - 60
+        grid = [lo + (hi - lo) * i / 6 for i in range(7)]
+        spots = []
+        for _ in range(n):
+            best = max(((gx, gy) for gx in grid for gy in grid),
+                       key=lambda p: min(math.dist(p, q) for q in keep + spots))
+            spots.append(best)
+        return spots
+
+    def run_policy(self, rid: int, model: str, speed: float = 0.6, no_reverse: bool = False,
+                   place: bool = True):
+        """Let a trained policy (tools/train.py) drive car `rid` for one episode of its game, through
+        the safety layer. In the simulator the car is first put on one of the game's own start poses
+        (place=True) and the other cars are parked out of its way; on the real field it starts from
+        where it is, if the game allows that start (e.g. the race needs the car on the ring)."""
+        from .policy import PolicyDriver
+        path = Path(model)
+        if not path.is_absolute():
+            path = ROOT / "models" / path
+        if path.suffix != ".zip":
+            path = path.with_suffix(".zip")
+        if not path.exists():
+            return False, f"no policy {path.name} in models/"
+        r = self.state.robots.get(rid) if self.state else None
+        if r is None or not r.visible:
+            return False, "robot not visible"
+        try:
+            drv = PolicyDriver(path, speed=speed, no_reverse=no_reverse, dd=self.dd)
+        except Exception as e:
+            return False, f"cannot load {path.name}: {e}"
+        placed = False
+        if self.mode != "real" and place and hasattr(self.backend, "true_pose"):
+            x, y, th = drv.start_pose()
+            with self.lock, self._blk:
+                robots = {i: self.backend.true_pose(i) for i in range(self.backend.n)}
+                robots[rid] = (x, y, th)
+                others = [i for i in robots if i != rid]
+                for i, spot in zip(others, self._parking_spots(len(others), (x, y), drv.game.overlays())):
+                    robots[i] = (*spot, 0.0)
+                self.state = self.backend.reset({"robots": robots, "objects": {}})
+                for i in robots:
+                    self.modes[i] = "idle"
+                self.trails.clear()
+            placed = True
+        with self.lock:
+            ws = self.state
+            if not placed:
+                ok, why = drv.ready(ws, rid)
+                if not ok:
+                    return False, why
+            drv.begin(ws, rid, placed)
+            self.policies[rid] = drv
+            self.modes[rid] = "policy"
+            self._gen += 1
+            self._log(f"robot {rid}: policy {path.stem} ({drv.game_name}) at {drv.speed:.0%} speed")
+        return True, f"driving with {path.stem}"
+
     def drive(self, rid: int, left: float, right: float):
         """Manual driving; must be repeated (expires after 0.3 s, like a dead-man switch)."""
         with self.lock:
@@ -366,6 +458,8 @@ class ControlCenter:
     def stop(self, rid: int | None = None):
         with self.lock:
             for i in ([rid] if rid is not None else list(set(self.modes) | set(self.robot_ids()))):
+                if self.modes.get(i) == "policy" and i in self.policies:
+                    self.policies[i].result = "stopped"
                 self.modes[i] = "idle"
                 self.manual.pop(i, None)
             self._gen += 1
@@ -444,7 +538,18 @@ class ControlCenter:
                     if c.done:
                         self.modes[rid] = "idle"
                         self._log(f"robot {rid}: arrived")
+                elif mode == "policy" and rid not in self.policies:
+                    self.modes[rid] = "idle"
+                elif mode == "policy" and r is not None and r.visible:
+                    drv = self.policies[rid]
+                    cmd, done = drv.step(ws, rid)
+                    if done:
+                        self.modes[rid] = "idle"
+                        info = ", ".join(f"{k} {v:.2f}" if isinstance(v, float) else f"{k} {v}" for k, v in drv.info.items())
+                        self._log(f"robot {rid}: policy {drv.result} after {drv.steps / 30:.1f} s ({info})")
                 s = max(0.0, min(1.0, p.max_speed))
+                if mode == "policy" and rid in self.policies:
+                    s *= self.policies[rid].speed
                 if s < 1.0 and (cmd.left or cmd.right):
                     # scale the body motion, not each wheel's command: on this car's non-linear
                     # motors a per-wheel multiply sends both wheels to the same minimum speed and
@@ -468,7 +573,8 @@ class ControlCenter:
             safe = self.safety.filter(ws, cmds, self.tracker_status()["ok"], now, battery) if ws else cmds
             self.last_cmds = safe
             self.backend.apply(safe)
-        self.state = self.backend.step()           # paces the loop at control_hz (outside the lock)
+        with self._blk:
+            self.state = self.backend.step()       # paces the loop at control_hz (outside the main lock)
 
     def _loop(self):
         period = 1.0 / self.backend.control_hz
@@ -526,12 +632,37 @@ class ControlCenter:
                     "trail": self.trails.get(rid, [])[-150:],
                     "safety": self.safety.events.get(rid, ""),
                     "flashing": bool(rid in self.flash_jobs and self.flash_jobs[rid]["proc"].poll() is None),
+                    "omega": r.omega if r else 0,
+                    "policy": ({**self.policies[rid].summary(), "running": mode == "policy"}
+                               if rid in self.policies else None),
                 })
             m = self.cfg["markers"]
+            objects = [{"id": o.id, "kind": o.kind, "x": o.x, "y": o.y, "theta": o.theta, "visible": o.visible}
+                       for o in (ws.objects.values() if ws else [])]
             return {
                 "mode": self.mode, "estop": self.safety.estop, "tracker": self.tracker_status(),
                 "settings": asdict(self.safety.settings), "robots": robots, "log": self.log[-12:],
+                "objects": objects,
                 "field": {"size": self.cfg["field"]["width_mm"], "wall": self.cfg["field"]["wall_thickness_mm"],
                           "towers": [[tid, x, y] for tid, (x, y, z) in m["corners"].items()]},
                 "pi_preview": f"http://{self.pi_host}:8080" if self.pi_host else None,
             }
+
+    def scene(self) -> dict:
+        """The fixed geometry of the field and the cars, for the 3D view (mm)."""
+        f, m, rm, v = self.cfg["field"], self.cfg["markers"], self.cfg["robot_model"], self.cfg["vision"]
+        return {
+            "field": {"width": f["width_mm"], "height": f.get("height_mm", f["width_mm"]),
+                      "wall_height": f.get("wall_height_mm", 100), "wall_thickness": f.get("wall_thickness_mm", 10),
+                      "tile": f.get("tile_size_mm", 250)},
+            "towers": [{"id": tid, "x": x, "y": y, "z": z, "size": m["corner_size_mm"]}
+                       for tid, (x, y, z) in m["corners"].items()],
+            "robot": {"length": rm["length_mm"], "width": rm["width_mm"], "wheel_radius": rm["wheel_radius_mm"],
+                      "wheel_width": rm.get("wheel_width_mm", 8), "track": rm["track_mm"],
+                      "axle_offset": rm.get("axle_offset_mm", 0), "caster_offset": rm.get("caster_offset_mm", 25),
+                      "caster_radius": rm.get("caster_radius_mm", 5),
+                      "marker_height": v.get("robot_marker_height_mm", rm.get("height_mm", 45)),
+                      "marker_size": m["robot_size_mm"]},
+            "camera": {"height": self.cfg["camera"].get("height_mm", 1300)},
+            "margin": self.margin,
+        }

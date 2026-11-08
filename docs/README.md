@@ -7,6 +7,7 @@ Start at the top if you are new; jump to any page once you know your way around.
 | Page | What you get from it |
 |---|---|
 | [Getting started](getting_started.md) | What RoboField is in five minutes, install, drive a simulated car, then bring up the real field step by step |
+| [The RoboField app](app.md) | One window for everything: field, 3D view, training, tools, tuning |
 | [Control Center](control_center.md) | The web app: every panel, keyboard shortcuts, saved moves, the HTTP API |
 | [Tuning guide](tuning.md) | Every parameter on the tuning page, what it does, and which one to change for a given symptom |
 

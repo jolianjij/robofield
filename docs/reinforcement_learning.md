@@ -123,6 +123,12 @@ it in randomized worlds, a fairer test of how it will do on the real car.
 
 ### Exercise 2: train your own
 
+The easiest way is the **Training** tab of the [RoboField app](app.md): choose the game and a length,
+press Start, and the learning curve draws itself as it learns. Then **Evaluate** scores it and
+**Drive** lets it control a car in the simulator (watch it in the 3D view). The same from the
+command line, for any one-car game: `python tools/train.py --game race --timesteps 2000000 --name race_mine`.
+Below is the race's own script, which also logs for TensorBoard.
+
 ```bash
 python tools/train_race.py --timesteps 300000 --out models/race_mine.zip --tensorboard
 ```
