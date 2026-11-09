@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "robofield"
 version = "0.1.0"
 description = "Dumb robots, smart environment: a low-cost camera-tracked arena for robot control and AI on real robots"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24",
@@ -20,7 +21,6 @@ authors = [{ name = "Julian Wassouf" }]
 keywords = ["robotics", "multi-robot", "reinforcement-learning", "mujoco", "aruco", "education"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Intended Audience :: Education",
   "Intended Audience :: Science/Research",
@@ -49,6 +49,9 @@ all = ["robofield[dev,rl,sim,train,app,tools]"]
 
 [tool.setuptools.packages.find]
 include = ["robofield*"]
+
+[tool.setuptools.package-data]
+robofield = ["app/static/*"]          # the app's web pages and icon
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

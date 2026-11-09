@@ -1,5 +1,9 @@
 # RoboField
 
+[![tests](https://github.com/jolianjij/robofield/actions/workflows/tests.yml/badge.svg)](https://github.com/jolianjij/robofield/actions/workflows/tests.yml)
+[![docs](https://github.com/jolianjij/robofield/actions/workflows/docs.yml/badge.svg)](https://jolianjij.github.io/robofield/)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Dumb robots, smart environment.** RoboField is a low-cost, open-source arena for testing robot
 control and AI ideas on real robots, not just in simulation.
 

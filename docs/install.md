@@ -42,6 +42,10 @@ also be installed one at a time:
 
 For example, a computer that only runs the simulator and the app: `pip install -e ".[sim,app]"`.
 
+RoboField is used from its folder (a clone of the repository): the app, the tools, `config/`, your
+`custom/` programs and `models/` all live there. That is why it is installed with `-e` ("editable"):
+Python uses the code in the folder directly, so your changes take effect without reinstalling.
+
 ## Check it
 
 ```bash
