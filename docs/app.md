@@ -7,8 +7,9 @@ the simulator and on the real field, and you can switch between the two at any t
 
 ## Start it
 
+After [installing](install.md), double-click the **RoboField** icon on the Desktop (Windows), or:
+
 ```bash
-pip install -e ".[dev,rl,sim,train,app]"      # once
 python tools/robofield_app.py                  # opens the RoboField window, in the simulator
 ```
 

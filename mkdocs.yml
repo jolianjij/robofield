@@ -1,0 +1,111 @@
+# The RoboField documentation website (https://jolianjij.github.io/robofield/), built from docs/.
+#   pip install -e ".[docs]"
+#   mkdocs serve          # preview at http://127.0.0.1:8001 while you edit
+#   mkdocs build --strict # what the website workflow runs on every push (.github/workflows/docs.yml)
+site_name: RoboField
+site_description: "Dumb robots, smart environment: a low-cost camera-tracked arena for robot control and AI on real robots"
+site_url: https://jolianjij.github.io/robofield/
+repo_url: https://github.com/jolianjij/robofield
+repo_name: jolianjij/robofield
+edit_uri: edit/main/docs/
+copyright: RoboField · MIT License
+dev_addr: 127.0.0.1:8001
+
+exclude_docs: |
+  /README.md
+
+theme:
+  name: material
+  favicon: assets/robofield.png
+  logo: assets/robofield.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle: { icon: material/weather-sunny, name: Light mode }
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+
+hooks:
+  - docs_hooks.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: null
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            show_signature_annotations: true
+            separate_signature: false
+            filters: ["!^_"]
+            heading_level: 2
+
+nav:
+  - Home: index.md
+  - Start here:
+      - Getting started: getting_started.md
+      - Install: install.md
+      - The app: app.md
+  - Use it:
+      - Control Center: control_center.md
+      - Tuning guide: tuning.md
+      - Lab (your own programs): lab.md
+      - Reinforcement learning: reinforcement_learning.md
+  - How it works:
+      - Architecture: architecture.md
+      - Kinematics: kinematics.md
+      - Motion control: control.md
+      - Vision: vision.md
+      - Testing and results: testing.md
+  - Reference:
+      - Coordinates: coordinates.md
+      - Field: field.md
+      - Markers: markers.md
+      - Protocol: protocol.md
+      - Photos: images/README.md
+      - "Legacy: PlatformIO": platformio_vscode.md
+  - API:
+      - Overview: api/index.md
+      - robofield.core: api/core.md
+      - robofield.control: api/control.md
+      - robofield.app: api/app.md
+      - robofield.lab: api/lab.md
+      - robofield.games and envs: api/games.md
+      - robofield.sim and real: api/backends.md
+      - robofield.comm and vision: api/comm_vision.md

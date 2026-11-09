@@ -275,7 +275,7 @@ command leaves the laptop → WiFi → firmware duty ramp → motors spin up →
 → next camera exposure → ArUco + pose on the Pi (~23 ms) → UDP to the laptop → next loop tick
 ```
 
-The loop cannot make this shorter, so it predicts across it instead ([motion control](control.md#2-predict-dont-react--robofieldcontrolpredictorpy)).
+The loop cannot make this shorter, so it predicts across it instead ([motion control](control.md#2-predict-dont-react)).
 
 ## 5. Threads and shared state
 

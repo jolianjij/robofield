@@ -54,7 +54,7 @@ Open `http://localhost:8000`. From a phone or tablet on the same WiFi, use
 | Tool | How to use it |
 |---|---|
 | **Select** | Click a car to select it |
-| **Go to pose** | Press where the car should go, drag toward the direction it should face, release. The car turns to the path, drives it, stops, then turns to the heading ([how](control.md#3-the-pose-controller--robofieldcontrolpose_controllerpy)) |
+| **Go to pose** | Press where the car should go, drag toward the direction it should face, release. The car turns to the path, drives it, stops, then turns to the heading ([how](control.md#3-the-pose-controller)) |
 | **Draw path** | Draw any curve; the car follows it. Tick **turn to the last direction at the end** to make it finish facing along your last stroke |
 | **sketch only** | Draw a path without the car moving, to design a move and save it |
 

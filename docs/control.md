@@ -61,7 +61,9 @@ Every controller maps the speed it wants through the measured curve (`DiffDrive.
 asking for 150 mm/s gives 150 mm/s; speeds below the minimum are scaled up together so the turn
 ratio, and therefore the path's curvature, is kept. Worked examples: [kinematics](kinematics.md#3-the-motor-model-what-a-command-really-does).
 
-## 2. Predict, don't react — `robofield/control/predictor.py`
+## 2. Predict, don't react
+
+The code: `robofield/control/predictor.py` and `robofield/control/estimator.py`.
 
 ### First, filter: the EKF (`robofield/control/estimator.py`)
 
@@ -87,7 +89,9 @@ knows the steering already changed.
 
 Switch it off on the tuning page (`Prediction on (1) / off (0)`) to see the difference.
 
-## 3. The pose controller — `robofield/control/pose_controller.py`
+## 3. The pose controller
+
+The code: `robofield/control/pose_controller.py`.
 
 `PoseController` takes a car to a position **and** an orientation, along a path. Clicking a goal on
 the map gives it a straight path (waypoints every 40 mm, kept 63 mm from the walls); drawing a path

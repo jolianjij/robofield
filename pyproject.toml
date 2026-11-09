@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robofield"
-version = "0.0.1"
-description = "Open-source framework for multi-robot games and AI experiments"
+version = "0.1.0"
+description = "Dumb robots, smart environment: a low-cost camera-tracked arena for robot control and AI on real robots"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -16,12 +16,36 @@ dependencies = [
   "pyserial>=3.5",
 ]
 
+authors = [{ name = "Julian Wassouf" }]
+keywords = ["robotics", "multi-robot", "reinforcement-learning", "mujoco", "aruco", "education"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/jolianjij/robofield"
+Documentation = "https://jolianjij.github.io/robofield/"
+Source = "https://github.com/jolianjij/robofield"
+
+# What each option adds (pip install -e ".[all]" for everything on the laptop):
+#   sim    the MuJoCo simulator                 rl     Gymnasium / PettingZoo environments
+#   train  PPO training (PyTorch), TensorBoard  app    the app's own window (pywebview)
+#   tools  screen recording, the older goal GUI dev    the tests
+#   docs   building the documentation website
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 rl = ["gymnasium>=0.29", "pettingzoo>=1.24"]
 sim = ["mujoco>=3.0"]
-train = ["stable-baselines3>=2.3", "torch>=2.2"]
+train = ["stable-baselines3>=2.3", "torch>=2.2", "tensorboard>=2.14"]
 app = ["pywebview>=5"]
+tools = ["websockets>=12", "matplotlib>=3.7"]
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.25"]
+all = ["robofield[dev,rl,sim,train,app,tools]"]
 
 [tool.setuptools.packages.find]
 include = ["robofield*"]

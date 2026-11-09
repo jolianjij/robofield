@@ -59,24 +59,30 @@ Full write-up with the data: [`docs/control.md`](docs/control.md).
 
 ## Quick start
 
-No hardware needed to try it: the simulator runs the same code.
+No hardware needed to try it: the simulator runs the same code. You need Python 3.10+ and git.
 
 ```bash
 git clone https://github.com/jolianjij/robofield.git
 cd robofield
-pip install -e ".[dev,rl,sim,train,app]"
-pytest                                                           # the tests, no hardware
-python tools/robofield_app.py                                   # the app: field, 3D view, training, tools
 ```
 
+Then **Windows:** double-click `install.bat`; a RoboField icon appears on the Desktop.
+**macOS / Linux:** `bash install.sh`, then `.venv/bin/python tools/robofield_app.py`.
+
+The scripts make a private Python environment in `.venv/`, install every library and run the
+self-check (`python tools/doctor.py`). By hand: `pip install -e ".[all]"`. Details, options and
+fixes: [install guide](docs/install.md).
+
 The app opens in the simulator; switch to **Real field** in its top bar ([the app](docs/app.md)).
-`python tools/robofield_app.py --shortcut` puts a RoboField icon on the Windows Desktop. Just the
-Control Center page: `python tools/control_center.py` (`--real --pi <pi-address>` for the field).
+Just the Control Center page: `python tools/control_center.py` (`--real --pi <pi-address>` for the field).
 
 On the Pi: `pi/install.sh`, then `.venv/bin/python pi/pi_tracker.py --preview 8080`. Calibrate the
 camera once with `pi/pi_calibrate.py` (see [`pi/README.md`](pi/README.md)).
 
 ## Documentation
+
+**Documentation website: [jolianjij.github.io/robofield](https://jolianjij.github.io/robofield/)**, the same pages
+as `docs/`, searchable, with the API reference.
 
 New here? Read [Getting started](docs/getting_started.md): RoboField in five minutes, then a
 simulated car, then the real field step by step. Everything else is listed in [`docs/`](docs/README.md):
@@ -98,6 +104,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 | Command | What it does |
 |---|---|
 | `tools/robofield_app.py` | **the RoboField app**: everything below in one window |
+| `tools/doctor.py` | check this computer is ready: Python, libraries, simulator, config (`--network`: the Pi and cars) |
 | `tools/train.py --game race` | train / evaluate a PPO policy for any one-car game, including your own tasks |
 | `tools/autotune.py --sim` | find good controller settings automatically (`--real` on the car) |
 | `tools/cars.py list` / `test 0` | find cars on the network; drive one through a self-test |

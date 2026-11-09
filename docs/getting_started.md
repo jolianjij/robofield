@@ -37,22 +37,14 @@ You need Python 3.10 or newer and git.
 ```bash
 git clone https://github.com/jolianjij/robofield.git
 cd robofield
-python -m venv .venv
 ```
 
-Activate the environment (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` on
-macOS and Linux), then install RoboField with the simulator, the RL environments and the tests:
+Then run **`install.bat`** (Windows: double-click it) or **`bash install.sh`** (macOS, Linux). It
+makes a private Python environment in `.venv/`, installs every library, and checks the result.
+Details, options and fixes: [install](install.md). To check again later:
 
 ```bash
-pip install -e ".[dev,rl,sim]"
-```
-
-Add `train` to the list (`".[dev,rl,sim,train]"`) if you want to train RL policies; it installs
-PyTorch and Stable-Baselines3.
-
-Check that everything works:
-
-```bash
+python tools/doctor.py
 pytest
 ```
 
@@ -60,9 +52,10 @@ All tests run without hardware.
 
 ## 3. Drive a simulated car
 
+Double-click the **RoboField** icon on the Desktop (Windows), or:
+
 ```bash
-pip install -e ".[train,app]"
-python tools/robofield_app.py
+.venv/bin/python tools/robofield_app.py        # Windows: .venv\Scripts\python tools\robofield_app.py
 ```
 
 The RoboField window opens on the **Field** tab, with two simulated cars ([the app](app.md)). Try, in order:

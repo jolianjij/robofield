@@ -110,7 +110,14 @@ def main():
             print("pywebview is not installed (pip install -e \".[app]\"): opening the browser instead")
     try:
         if window is not None:
-            webview.start()                                # returns when the window is closed
+            try:
+                webview.start()                            # returns when the window is closed
+            except Exception as e:                         # e.g. Linux without a GTK/Qt backend for pywebview
+                print(f"no app window ({e}): opening the browser instead; Ctrl+C to quit")
+                window = None
+                webbrowser.open(url)
+                while True:
+                    time.sleep(1)
         else:
             if not a.headless:
                 webbrowser.open(url)

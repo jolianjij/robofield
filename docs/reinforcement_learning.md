@@ -108,8 +108,8 @@ limit, stop when the car is not seen).
 
 ## 5. Hands-on
 
-Install the training extra once: `pip install -e ".[train]"` (PyTorch and Stable-Baselines3), and
-`pip install tensorboard` for the learning curves.
+The install scripts already installed what training needs: PyTorch, Stable-Baselines3 and
+TensorBoard ([install](install.md)). By hand: `pip install -e ".[train]"`.
 
 ### Exercise 1: test the trained policy in the simulator
 

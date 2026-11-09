@@ -1,11 +1,13 @@
 # RoboField documentation
 
-Start at the top if you are new; jump to any page once you know your way around.
+Start at the top if you are new; jump to any page once you know your way around. The same pages,
+searchable and with the API reference: [jolianjij.github.io/robofield](https://jolianjij.github.io/robofield/).
 
 ## New to the project
 
 | Page | What you get from it |
 |---|---|
+| [Install](install.md) | One-click install scripts, what each library is for, the self-check, fixes for common problems |
 | [Getting started](getting_started.md) | What RoboField is in five minutes, install, drive a simulated car, then bring up the real field step by step |
 | [The RoboField app](app.md) | One window for everything: field, 3D view, training, tools, tuning |
 | [Lab](lab.md) | Write your own tasks (to train), policies (one car) and systems (several cars) |
