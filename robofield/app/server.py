@@ -32,7 +32,7 @@ GET  /api/moves             the saved moves (drawn paths kept to replay, config/
 POST /api/moves/save        {"id", "name"} saves that car's last drawn path; or {"name", "points", "theta"}
 POST /api/moves/start       {"id", "name"}  park the car at the move's start, facing along it
 POST /api/moves/play        {"id", "name"}  drive the move (going to its start first if needed)
-POST /api/policy            {"id", "model", "speed"?, "no_reverse"?, "place"?}  an RL policy drives the car
+POST /api/policy            {"id", "model", "speed"?, "no_reverse"?, "place"?, "goal"?: [x, y]}  an RL policy drives the car
 POST /api/sim/place         {"id", "x", "y", "theta"}   simulator only: put a car there
 
 App [app]
@@ -225,8 +225,10 @@ def make_handler(target):
                 elif p == "/api/moves/play":
                     ok, msg = c.play_move(int(d["id"]), d["name"])
                 elif p == "/api/policy":
+                    goal = d.get("goal")
                     ok, msg = c.run_policy(int(d["id"]), str(d["model"]), float(d.get("speed", 0.6)),
-                                           bool(d.get("no_reverse", False)), bool(d.get("place", True)))
+                                           bool(d.get("no_reverse", False)), bool(d.get("place", True)),
+                                           None if goal is None else (float(goal[0]), float(goal[1])))
                 elif p == "/api/sim/place":
                     ok, msg = c.place_car(int(d["id"]), float(d["x"]), float(d["y"]), float(d.get("theta", 0.0)))
                 elif rt is not None and p == "/api/app/mode":

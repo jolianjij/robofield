@@ -26,6 +26,11 @@ class GoToGoal(Game):
         self._last_action = np.zeros(2)
         return {"robots": {0: start}, "objects": {}}
 
+    def set_goal(self, x: float, y: float):
+        """Use this goal instead of a random one (experiments drive a fixed list of targets)."""
+        self.goal = (float(x), float(y))
+        self.reached = False
+
     def begin(self, ws):
         """A random goal at least 150 mm from wherever the car is."""
         r = ws.robots[0]

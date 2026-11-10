@@ -402,7 +402,7 @@ class ControlCenter:
         return spots
 
     def run_policy(self, rid: int, model: str, speed: float = 0.6, no_reverse: bool = False,
-                   place: bool = True):
+                   place: bool = True, goal: tuple | None = None):
         """Let a trained policy (tools/train.py) drive car `rid` for one episode of its game, through
         the safety layer. In the simulator the car is first put on one of the game's own start poses
         (place=True) and the other cars are parked out of its way; on the real field it starts from
@@ -443,6 +443,11 @@ class ControlCenter:
                 if not ok:
                     return False, why
             drv.begin(ws, rid, placed)
+            if goal is not None:                            # a given target (experiments), not a random one
+                try:
+                    drv.set_goal(goal)
+                except ValueError as e:
+                    return False, str(e)
             self.policies[rid] = drv
             self.modes[rid] = "policy"
             self._gen += 1
@@ -695,6 +700,8 @@ class ControlCenter:
                     "safety": self.safety.events.get(rid, ""),
                     "flashing": bool(rid in self.flash_jobs and self.flash_jobs[rid]["proc"].poll() is None),
                     "omega": r.omega if r else 0,
+                    "cmd": ([round(self.last_cmds[rid].left, 4), round(self.last_cmds[rid].right, 4)]
+                            if rid in self.last_cmds else [0, 0]),
                     "policy": ({**self.policies[rid].summary(), "running": mode == "policy"}
                                if rid in self.policies else None),
                     "program": self.programs[rid].summary(mode == "program") if rid in self.programs else None,

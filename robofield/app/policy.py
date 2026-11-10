@@ -73,6 +73,12 @@ class PolicyDriver:
         self._prev, self._last, self.steps, self.result = v, np.zeros(2, dtype=np.float32), 0, ""
         self.info = self.game.info(v)
 
+    def set_goal(self, goal) -> None:
+        """A given target for a game that has one (goto), instead of the game's own random choice."""
+        if not hasattr(self.game, "set_goal"):
+            raise ValueError(f"'{self.game_name}' has no goal to set")
+        self.game.set_goal(*goal)
+
     def step(self, ws: WorldState, rid: int) -> tuple[RobotCommand, bool]:
         v = self.view(ws, rid)
         obs = np.concatenate([self.game.observe(v, 0), self._last]).astype(np.float32)
