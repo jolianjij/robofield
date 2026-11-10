@@ -25,6 +25,17 @@ from robofield.control.kinematics import DiffDrive, deadzones_from_config
 from robofield.control.predictor import LatencyPredictor
 from .scene import MM, build_scene
 
+# Domain randomization: every reset draws each value uniformly from its range (config/field.yaml
+# sim.randomization overrides any of them). Scales multiply the measured nominal value.
+RANDOMIZATION = {
+    "latency_s": (0.15, 0.28),      # loop delay; measured ~0.2 s (median 0.234 s with spin-up)
+    "deadzone_scale": (0.7, 1.3),   # each wheel's dead zone, around its own nominal
+    "motor_gain": (0.88, 1.12),     # each wheel's speed per command: unmatched motors make it drift
+    "pose_noise_mm": (0.3, 2.0),    # tracking noise (std)
+    "friction_scale": (0.6, 1.3),   # wheel friction
+    "mass_scale": (0.9, 1.25),      # car mass
+}
+
 
 class SimBackend(Backend):
     def __init__(self, cfg: dict, n_robots: int = 1, objects: tuple = (), seed: int = 0,
@@ -35,6 +46,7 @@ class SimBackend(Backend):
         self.rng = np.random.default_rng(seed)
         sim = cfg.get("sim", {})
         self.randomize = sim.get("randomize", False) if randomize is None else randomize
+        self.ranges = {k: tuple(map(float, v)) for k, v in {**RANDOMIZATION, **(sim.get("randomization") or {})}.items()}
         self.control_hz = float(cfg["control"]["rate_hz"])
         self.model = mujoco.MjModel.from_xml_string(build_scene(cfg, n_robots, objects, markers))
         self.data = mujoco.MjData(self.model)
@@ -79,17 +91,17 @@ class SimBackend(Backend):
         self.model.geom_friction[:] = self._base_friction
         self.model.body_mass[:] = self._base_mass
         if self.randomize:
-            r = self.rng
-            p["latency"] = r.uniform(0.15, 0.28)                          # measured ~0.2 s on the real field
+            r, R = self.rng, self.ranges
+            p["latency"] = r.uniform(*R["latency_s"])
             # jitter each wheel's dead zone independently around its own measured nominal
-            p["deadzone"] = np.clip(p["deadzone"] * r.uniform(0.7, 1.3, size=(self.n, 2)), 0.0, 0.5)
-            p["gain"] = r.uniform(0.88, 1.12, size=(self.n, 2))          # unmatched motors: the car drifts
-            p["noise_xy"] = r.uniform(0.3, 2.0)
+            p["deadzone"] = np.clip(p["deadzone"] * r.uniform(*R["deadzone_scale"], size=(self.n, 2)), 0.0, 0.5)
+            p["gain"] = r.uniform(*R["motor_gain"], size=(self.n, 2))
+            p["noise_xy"] = r.uniform(*R["pose_noise_mm"])
             for g in self._wheel_geoms:
-                self.model.geom_friction[g, 0] = self._base_friction[g, 0] * r.uniform(0.6, 1.3)
+                self.model.geom_friction[g, 0] = self._base_friction[g, 0] * r.uniform(*R["friction_scale"])
             for i in range(self.n):
                 b = self.model.body(f"robot{i}").id
-                self.model.body_mass[b] = self._base_mass[b] * r.uniform(0.9, 1.25)
+                self.model.body_mass[b] = self._base_mass[b] * r.uniform(*R["mass_scale"])
         self.p = p
         self._delay = max(0, round(p["latency"] * self.control_hz))
         if not self._latency_set:

@@ -3,7 +3,7 @@
 1. All visible tower-marker corners (known 3D positions at different heights) -> solvePnP
    gives the camera pose in the field frame. Non-coplanar points make this very stable.
 2. Each robot marker corner pixel is turned into a 3D ray and intersected with the plane
-   z = robot_marker_height_mm. No homography, no parallax error, and no per-marker PnP,
+   z = robot_marker_height_mm (objects: z = object_marker_height_mm, for ids >= object_id_min). No homography, no parallax error, and no per-marker PnP,
    so no IPPE orientation flips on small markers.
 
 Needs a camera calibration (essential anyway with a wide-angle lens).
@@ -30,6 +30,8 @@ class PlaneEstimator(PoseEstimator):
         super().__init__(cfg, camera_matrix, dist_coeffs)
         self.corner_size = float(cfg["markers"]["corner_size_mm"])
         self.plane_z = float(cfg["vision"].get("robot_marker_height_mm", 0))
+        self.object_z = float(cfg["vision"].get("object_marker_height_mm", self.plane_z))
+        self.object_min = int(cfg["markers"].get("object_id_min", 30))
         self.min_towers = int(cfg["vision"].get("min_towers", 2))
         self.R: np.ndarray | None = None   # field -> camera rotation
         self.t: np.ndarray | None = None
@@ -82,7 +84,8 @@ class PlaneEstimator(PoseEstimator):
         for mid, img_pts in detections.items():
             if mid in self.corner_world:
                 continue
-            q = self.pixels_to_plane(img_pts, self.plane_z)  # TL, TR, BR, BL in field mm
+            z = self.object_z if mid >= self.object_min else self.plane_z      # objects sit lower than cars
+            q = self.pixels_to_plane(img_pts, z)             # TL, TR, BR, BL in field mm
             centre = q.mean(axis=0)
             fwd = (q[0] + q[1]) / 2 - (q[3] + q[2]) / 2
             sides = np.linalg.norm(q - np.roll(q, -1, axis=0), axis=1)

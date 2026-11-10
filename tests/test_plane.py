@@ -65,3 +65,17 @@ def test_works_with_two_towers_occluded():
     det[11] = project(R, t, robot_corners(300, 700, 0.5), rng)
     p = PlaneEstimator(CFG, K).estimate_from_detections(det, 0.0)[0]
     assert math.hypot(p.x - 300, p.y - 700) < 5
+
+
+def test_objects_use_their_own_marker_height():
+    """A box marker 41 mm up must not be placed as if it were on top of a car (84 mm)."""
+    rng = np.random.default_rng(2)
+    R, t = camera()
+    cfg = {**CFG, "markers": {**CFG["markers"], "object_id_min": 30},
+           "vision": {**CFG["vision"], "robot_marker_height_mm": 84, "object_marker_height_mm": 41}}
+    det = {i: project(R, t, tower_corners(*TOWERS[i], 80), rng, noise=0.0) for i in TOWERS}
+    det[31] = project(R, t, robot_corners(850, 200, 0.0, z=41), rng, noise=0.0)     # a box near a corner
+    det[10] = project(R, t, robot_corners(850, 200, 0.0, z=84), rng, noise=0.0)     # a car at the same spot
+    poses = {p.marker_id: p for p in PlaneEstimator(cfg, K).estimate_from_detections(det, 0.0)}
+    assert math.hypot(poses[31].x - 850, poses[31].y - 200) < 2
+    assert math.hypot(poses[10].x - 850, poses[10].y - 200) < 2

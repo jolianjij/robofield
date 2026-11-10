@@ -19,6 +19,7 @@ markers:
   robot_size_mm: 40        # consider 40 mm with the Pi Camera 3 Wide (see docs/vision.md)
   object_size_mm: 35
   robot_id_offset: 10        # robot N uses marker 10 + N
+  object_id_min: 30          # markers from this id on are objects (boxes, pucks), not robots
 
 camera:
   index: 0
@@ -35,6 +36,7 @@ camera:
 vision:
   estimator: plane           # plane (recommended) | pnp | homography (flat corners only)
   robot_marker_height_mm: 84 # top of car above the field surface
+  object_marker_height_mm: 41 # marker on top of an object (ids from markers.object_id_min): a 40 mm box
   corner_refinement: subpix
 
 comm:
@@ -97,6 +99,13 @@ sim:
   pose_noise_mm: 0.8         # std of tracked position noise
   heading_noise_rad: 0.01
   randomize: false           # domain randomization (friction, mass, motor gain, latency)
+  randomization:             # the ranges drawn every episode when it is on (training uses it)
+    latency_s: [0.15, 0.28]       # loop delay, s (measured median 0.234 s)
+    deadzone_scale: [0.7, 1.3]    # x each wheel's dead zone
+    motor_gain: [0.88, 1.12]      # x each wheel's speed per command (unmatched motors)
+    pose_noise_mm: [0.3, 2.0]     # tracking noise, std
+    friction_scale: [0.6, 1.3]    # x wheel friction
+    mass_scale: [0.9, 1.25]       # x car mass
 
 battery:
   cells: 2                   # 2S pack, reported by the car as total pack voltage
