@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """One-time lens calibration for the Camera Module 3 Wide (strong distortion at the edges).
 
-Print a chessboard (9 x 6 inner corners, 25 mm squares, from https://calib.io or tools/), tape it
-flat to a board, and move it slowly under the camera: all over the image, near the corners and edges,
+Print a chessboard, tape it flat to a board, and count its INNER corners (where four squares meet):
+the reference board has 9 x 6 squares = 8 x 5 inner corners, 28 mm squares (the defaults). Then and move it slowly under the camera: all over the image, near the corners and edges,
 tilted in different directions. The script grabs a frame every 1.5 s when it sees the board and
 calibrates after 30 frames. Result: camera.npz (K, D) next to this file.
 
-    python3 pi_calibrate.py --cols 9 --rows 6 --square 25
+    python3 pi_calibrate.py                                  # the reference board: 8 x 5, 28 mm
+    python3 pi_calibrate.py --cols 9 --rows 6 --square 25    # another board
+    python3 pi_calibrate.py --source url:http://192.168.1.23:8080/video    # a phone as the camera
 """
 from __future__ import annotations
 
@@ -25,9 +27,9 @@ from frame_source import open_source  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cols", type=int, default=9)
-    ap.add_argument("--rows", type=int, default=6)
-    ap.add_argument("--square", type=float, default=25.0)
+    ap.add_argument("--cols", type=int, default=8, help="inner corners along a row (9 squares = 8)")
+    ap.add_argument("--rows", type=int, default=5, help="inner corners along a column (6 squares = 5)")
+    ap.add_argument("--square", type=float, default=28.0, help="square size, mm")
     ap.add_argument("--frames", type=int, default=30)
     ap.add_argument("--source", default="picamera")
     ap.add_argument("--out", default=str(HERE / "camera.npz"))

@@ -1,6 +1,7 @@
 """Calibrate the camera lens with a printed chessboard.
 
-    python tools/calibrate_camera.py --cols 9 --rows 6 --square 25
+    python tools/calibrate_camera.py                     # the reference board: 8 x 5 inner corners, 28 mm
+    python tools/calibrate_camera.py --cols 9 --rows 6 --square 25    # another board
 
 Show the board at many angles and positions; press SPACE to capture (aim for 20+),
 then q to compute. Saves calibration/camera.npz with K and D.
@@ -18,9 +19,9 @@ from camera import open_camera  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cols", type=int, default=9, help="inner corners per row")
-    ap.add_argument("--rows", type=int, default=6, help="inner corners per column")
-    ap.add_argument("--square", type=float, default=25.0, help="square size in mm")
+    ap.add_argument("--cols", type=int, default=8, help="inner corners per row (the reference board: 9 squares = 8)")
+    ap.add_argument("--rows", type=int, default=5, help="inner corners per column (6 squares = 5)")
+    ap.add_argument("--square", type=float, default=28.0, help="square size in mm")
     ap.add_argument("--camera", type=int, default=0)
     ap.add_argument("--out", default="calibration/camera.npz")
     a = ap.parse_args()

@@ -1,4 +1,11 @@
-"""Frame sources for the tracker: Raspberry Pi camera (picamera2), any OpenCV camera, or image files."""
+"""Frame sources for the tracker: the Raspberry Pi camera (picamera2), a USB camera, a network camera
+(a phone running an IP-camera app, or any MJPEG/RTSP stream), or image files.
+
+    picamera                       the Pi Camera Module (default on the Pi)
+    opencv:0                       USB camera number 0
+    url:http://192.168.1.23:8080/video   a phone IP-camera app, or any stream OpenCV can open
+    file:/path/*.png               saved images, for testing without a camera
+"""
 from __future__ import annotations
 
 import glob
@@ -38,13 +45,21 @@ class PiCameraSource:
 
 
 class OpenCVSource:
+    """A USB camera (an index) or a network stream (a URL). A stream sets its own size and rate in
+    its app; a USB camera is asked for MJPG at the given size with autofocus off."""
+
     def __init__(self, index=0, width=1920, height=1080, fps=30):
         self.cap = cv2.VideoCapture(index)
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        self.cap.set(cv2.CAP_PROP_FPS, fps)
-        self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        if not self.cap.isOpened():
+            raise RuntimeError(f"cannot open the camera {index!r}")
+        if isinstance(index, int):
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            self.cap.set(cv2.CAP_PROP_FPS, fps)
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        else:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)        # newest frame, not a backlog
 
     def read(self):
         ok, frame = self.cap.read()
@@ -73,12 +88,27 @@ class FileSource:
         pass
 
 
-def open_source(spec: str, **kw):
-    """'picamera' | 'opencv:0' | 'file:/path/*.png'"""
+def parse_source(spec: str):
+    """('picamera' | 'opencv' | 'file', argument) for a source spec (see the module docstring)."""
     if spec == "picamera":
-        return PiCameraSource(**kw)
+        return "picamera", None
+    if spec.startswith("url:"):
+        return "opencv", spec[4:]
+    if spec.startswith(("http://", "https://", "rtsp://")):
+        return "opencv", spec
     if spec.startswith("opencv"):
-        return OpenCVSource(int(spec.split(":")[1]) if ":" in spec else 0)
+        arg = spec.split(":", 1)[1] if ":" in spec else "0"
+        return "opencv", int(arg) if arg.isdigit() else arg
     if spec.startswith("file:"):
-        return FileSource(spec[5:])
-    raise ValueError(spec)
+        return "file", spec[5:]
+    raise ValueError(f"unknown camera source {spec!r}: picamera | opencv:0 | url:http://... | file:/path/*.png")
+
+
+def open_source(spec: str, **kw):
+    """'picamera' | 'opencv:0' | 'url:http://phone:8080/video' | 'file:/path/*.png'"""
+    kind, arg = parse_source(spec)
+    if kind == "picamera":
+        return PiCameraSource(**kw)
+    if kind == "opencv":
+        return OpenCVSource(arg)
+    return FileSource(arg)

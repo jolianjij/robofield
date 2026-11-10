@@ -41,6 +41,17 @@ tilted different ways. After 30 captures it saves `pi/camera.npz`. RMS under 0.5
   (focus is in dioptres = 1 / distance in metres).
 - By default poses are broadcast on UDP port 5005; use `--laptop <ip>` to send to one computer.
 
+## No Pi? A phone as the camera
+The tracker also runs on the laptop with any camera OpenCV can open. A phone with an IP-camera app
+(for example *IP Webcam* on Android) mounted above the field works: lock its focus and exposure in
+the app, then calibrate and track with its stream address:
+```bash
+python pi/pi_calibrate.py --source url:http://192.168.1.23:8080/video --out pi/camera.npz
+python pi/pi_tracker.py --source url:http://192.168.1.23:8080/video --preview 8080
+```
+A USB webcam: `--source opencv:0`. Calibrate with the same camera, at the same zoom, you track with.
+Expect lower accuracy than the Pi camera (phone streams are compressed and their timing varies).
+
 ## 6. Start automatically at boot
 ```bash
 sudo cp pi/robofield-tracker.service /etc/systemd/system/

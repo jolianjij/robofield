@@ -115,7 +115,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=str(HERE.parent / "config" / "field.yaml"))
     ap.add_argument("--calib", default=str(HERE / "camera.npz"), help="from pi_calibrate.py")
-    ap.add_argument("--source", default="picamera", help="picamera | opencv:0 | file:/path/*.png")
+    ap.add_argument("--source", default="picamera", help="picamera | opencv:0 (USB) | url:http://<phone>:8080/video | file:/path/*.png")
     ap.add_argument("--laptop", default="255.255.255.255", help="laptop IP (default: broadcast)")
     ap.add_argument("--port", type=int, default=POSE_PORT)
     ap.add_argument("--preview", type=int, default=0, help="port for the live MJPEG view (0 = off)")
