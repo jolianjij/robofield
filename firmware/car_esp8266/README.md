@@ -35,6 +35,25 @@ Power: 2S Li-ion (7.4–8.4 V) straight to the DRV8833's VM, 5 V buck for the D1
 - **Brake flag:** the protocol has one, but it is only applied for the loop iteration a packet
   arrives in, so in practice the motors coast when stopped.
 
+## Motor decay mode (why the car cannot crawl)
+
+Both firmware versions drive the DRV8833 in **fast decay**. Forward: IN1 gets the PWM and IN2 stays
+low; during the off-part of each PWM period both inputs are low and the motor coasts, so its current
+dies away quickly. Backward is the mirror image. A brake command sets both inputs high.
+
+Why fast decay: it is the simplest mapping (one PWM output per direction, the other at 0), the car
+coasts rather than brakes when a command drops, and it is gentle on the small gearboxes.
+
+What it costs: at a low duty the current dies out within each period, so a motor needs a large duty
+before it turns at all. Much of the dead zone (`LEFT_DEADZONE 0.26`, `RIGHT_DEADZONE 0.20`) and the
+car's ~100 mm/s minimum speed ([kinematics](../../docs/kinematics.md)) come from this.
+
+**Slow decay** would keep the current flowing between pulses (forward: IN1 high, IN2 = the inverted
+PWM, so the motor brakes during the off-time). Speed then follows the duty far more evenly and the
+car could crawl, which would make final positioning and turning much finer. It changes how the motor
+outputs switch, so it has **not** been made: try it on one car first, then lower the dead zones and
+measure the speed curve again (`tools/calibrate_motors.py`).
+
 ## Flashing (Arduino IDE 2.x)
 
 1. Boards Manager URL: `https://arduino.esp8266.com/stable/package_esp8266com_index.json`,

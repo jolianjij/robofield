@@ -58,6 +58,23 @@ its only sense.
 All grounds common.
 ```
 
+### The other controller: ESP32-C3 Super Mini
+
+Cars can also use an ESP32-C3 Super Mini with the same DRV8833 and power. Its firmware is
+`firmware/car/` (same radio protocol; built with PlatformIO for now, an Arduino IDE version is
+planned). Pins, from `firmware/car/include/config.h`:
+
+| Function | ESP32-C3 GPIO | Notes |
+|---|---|---|
+| Left motor IN1 / IN2 | 3 / 4 | DRV8833 (`DRIVER_DUAL_PWM`), 20 kHz PWM |
+| Right motor IN1 / IN2 | 6 / 7 | |
+| Gripper servo | 20 | |
+| WS2812B data | 10 | through 330 Ω |
+| Battery sense | 0 | 100k / 33k divider |
+
+Avoid GPIO 2, 8 and 9 (boot strapping pins). The first ESP32-C3 burned out from 5 V on a GPIO pin:
+check every line with a multimeter before connecting the board.
+
 ### Lessons from the first build
 
 - The first controller, an ESP32-C3, burned out, most likely from 5 V reaching a GPIO pin. Check
