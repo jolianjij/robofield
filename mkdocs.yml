@@ -93,6 +93,7 @@ nav:
       - Motion control: control.md
       - Vision: vision.md
       - Testing and results: testing.md
+      - Experiments: experiments.md
   - Reference:
       - Coordinates: coordinates.md
       - Field: field.md

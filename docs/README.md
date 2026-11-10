@@ -23,6 +23,7 @@ searchable and with the API reference: [jolianjij.github.io/robofield](https://j
 | [Motion control](control.md) | Delay prediction, the EKF, pure pursuit, pulse-and-wait turns, with the real-car measurements behind each choice |
 | [Vision](vision.md) | ArUco tracking on the Pi: three pose estimators and why the default one is used |
 | [Reinforcement learning](reinforcement_learning.md) | What RL is, how the race policy was trained, train your own, take it to the real car, and the plan for two-car football |
+| [Experiments](experiments.md) | Running experiments identically in sim and on the real field; the logs, the figures, the results |
 | [Testing and results](testing.md) | The automated test suite, the real-field measurement tools, and the measured results |
 
 ## Reference

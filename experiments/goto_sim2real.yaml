@@ -1,0 +1,27 @@
+# Experiment 1: go to a target, sim-to-real.
+# The same seeded targets for every condition, in the simulator and on the real field.
+#   python tools/experiment.py run experiments/goto_sim2real.yaml --backend sim
+#   python tools/experiment.py run experiments/goto_sim2real.yaml --backend app      # the real field, via the app
+#   python tools/experiment.py report experiments/runs/goto_sim2real_*
+name: goto_sim2real
+task: goto
+robot: 0
+episodes: 20            # targets per condition
+seed: 7
+start: [500, 500, 0.0]  # x mm, y mm, heading rad: placed in the simulator, driven to on the real field
+area: [150, 850]        # targets are drawn inside this square, mm
+min_hop_mm: 200         # each target at least this far from the one before
+time_limit_s: 10        # an episode longer than this fails
+success_mm: 30          # success = at rest within this distance of the target, in time
+settle_s: 0.8           # wait for the car to come to rest before measuring the final error
+speed: 1.0              # speed scale for every condition (the safety layer's limit still applies)
+
+conditions:
+  - name: baseline      # the classical controller: pure pursuit on the delay-predicted pose
+    controller: baseline
+  - name: ppo           # PPO trained in the plain simulator
+    controller: policy
+    model: goto_nodr
+  - name: ppo_dr        # PPO trained with domain randomization
+    controller: policy
+    model: goto_dr

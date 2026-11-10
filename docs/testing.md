@@ -82,6 +82,11 @@ The `compare` move (an S-curve across the field ending in a 120° turn), filmed 
 On a gentle S-curve the difference is modest; it is largest in turns on the spot, where the delay
 does the most damage.
 
+## Experiments
+
+The controlled comparisons for the paper (baseline vs PPO vs PPO with domain randomization, in sim and
+on the real field) are described in [experiments](experiments.md).
+
 ## Photos and videos of the tests
 
 Real-world photos and videos of the field, the car and these tests will go in

@@ -110,6 +110,7 @@ simulated car, then the real field step by step. Everything else is listed in [`
 | `tools/robofield_app.py` | **the RoboField app**: everything below in one window |
 | `tools/doctor.py` | check this computer is ready: Python, libraries, simulator, config (`--network`: the Pi and cars) |
 | `tools/train.py --game race` | train / evaluate a PPO policy for any one-car game, including your own tasks |
+| `tools/experiment.py run / report` | experiments with identical sim and real protocols; tables and figures for the paper |
 | `tools/autotune.py --sim` | find good controller settings automatically (`--real` on the car) |
 | `tools/cars.py list` / `test 0` | find cars on the network; drive one through a self-test |
 | `tools/measure_latency.py` | measure the command-to-camera delay on the real field |
